@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Compiles the whole package (Unity layer, UI and tests) against UnityEngine/UnityEditor reference
+    assemblies, to catch API mistakes without opening the editor. Nothing is executed.
+    Usage: dotnet build Tests~/UnityCompileCheck/UnityCompileCheck.csproj -p:UnityManaged=<folder with UnityEngine.dll and UnityEditor.dll>
+  -->
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <OutputType>Library</OutputType>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <DefineConstants>UNITY_EDITOR;UNITY_INCLUDE_TESTS;UNITY_2021_1_OR_NEWER</DefineConstants>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <NoWarn>CS0649</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Editor/**/*.cs" />
+    <Compile Include="../../Tests/Editor/**/*.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="UnityEngine"><HintPath>$(UnityManaged)/UnityEngine.dll</HintPath></Reference>
+    <Reference Include="UnityEditor"><HintPath>$(UnityManaged)/UnityEditor.dll</HintPath></Reference>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <PackageReference Include="NUnit" Version="3.14.0" />
+    <PackageReference Include="System.ValueTuple" Version="4.5.0" />
+  </ItemGroup>
+</Project>

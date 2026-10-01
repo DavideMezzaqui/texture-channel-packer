@@ -1,0 +1,3 @@
+# .NET build output of the test harness (Tests~ is ignored by Unity)
+Tests~/**/bin/
+Tests~/**/obj/

@@ -1,0 +1,16 @@
+{
+    "name": "DAVFX.TextureChannelPacker.Editor",
+    "rootNamespace": "DAVFX.TextureChannelPacker",
+    "references": [],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
