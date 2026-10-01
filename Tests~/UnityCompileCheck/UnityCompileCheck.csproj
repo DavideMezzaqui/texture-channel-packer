@@ -1,28 +1,42 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!--
-    Compiles the whole package (Unity layer, UI and tests) against UnityEngine/UnityEditor reference
+    Compiles the whole package (Unity layer, UI and tests) against a real Unity installation's managed
     assemblies, to catch API mistakes without opening the editor. Nothing is executed.
-    Usage: dotnet build Tests~/UnityCompileCheck/UnityCompileCheck.csproj -p:UnityManaged=<folder with UnityEngine.dll and UnityEditor.dll>
+
+    UnityManaged: folder containing UnityEngine.dll and UnityEditor.dll
+                  (Unity 2022+: <Editor>/Data/Managed/UnityEngine, older: <Editor>/Data/Managed).
+    UnityDefines: the version symbols Unity would define, e.g.
+                  UNITY_2021_3_OR_NEWER;UNITY_2022_1_OR_NEWER;UNITY_2022_3_OR_NEWER;UNITY_6000_0_OR_NEWER
+
+    UnityFramework: netstandard2.1 (default, Unity 2022+) or net48 (older reference assemblies).
+    Separate symbols with %3B on the command line.
+
+    Usage: dotnet build Tests~/UnityCompileCheck/UnityCompileCheck.csproj -p:UnityManaged=... -p:UnityDefines=...
   -->
   <PropertyGroup>
-    <TargetFramework>net48</TargetFramework>
+    <!-- Unity 2022+ assemblies target .NET Standard 2.1 (the default Unity API profile); older ones .NET Framework. -->
+    <UnityFramework Condition="'$(UnityFramework)' == ''">netstandard2.1</UnityFramework>
+    <TargetFramework>$(UnityFramework)</TargetFramework>
     <LangVersion>9.0</LangVersion>
     <Nullable>disable</Nullable>
     <OutputType>Library</OutputType>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-    <DefineConstants>UNITY_EDITOR;UNITY_INCLUDE_TESTS;UNITY_2021_1_OR_NEWER</DefineConstants>
+    <DefineConstants>UNITY_EDITOR;UNITY_INCLUDE_TESTS;$(UnityDefines)</DefineConstants>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <NoWarn>CS0649</NoWarn>
+    <NoWarn>CS0649;MSB3277;CS1701;CS1702</NoWarn>
+    <BaseOutputPath>bin/$(UnityLabel)/</BaseOutputPath>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../Editor/**/*.cs" />
     <Compile Include="../../Tests/Editor/**/*.cs" />
   </ItemGroup>
   <ItemGroup>
-    <Reference Include="UnityEngine"><HintPath>$(UnityManaged)/UnityEngine.dll</HintPath></Reference>
-    <Reference Include="UnityEditor"><HintPath>$(UnityManaged)/UnityEditor.dll</HintPath></Reference>
-    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <UnityAssembly Include="$(UnityManaged)/UnityEngine.dll;$(UnityManaged)/UnityEditor.dll;$(UnityManaged)/UnityEngine.*Module.dll;$(UnityManaged)/UnityEditor.*Module.dll" />
+    <Reference Include="@(UnityAssembly)" Private="false" />
     <PackageReference Include="NUnit" Version="3.14.0" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(UnityFramework)' == 'net48'">
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
     <PackageReference Include="System.ValueTuple" Version="4.5.0" />
   </ItemGroup>
 </Project>

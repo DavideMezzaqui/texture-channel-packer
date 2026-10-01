@@ -204,10 +204,32 @@ Ogni caso ha un test automatico. "Esatto" significa confronto bit per bit, nessu
 - Integrazione nell'hub: la vista è già separata (`ChannelPackerView`), serve solo sapere come è fatto l'hub.
 - Texture array, cubemap, 3D.
 
-## 9. Limiti noti (onesti)
+## 9. Compatibilità Unity
 
-- Il codice è stato compilato contro le API di Unity e testato fuori dall'editor (core, codec, confronto con Pillow/OpenEXR).
-  I test di integrazione con l'AssetDatabase reale vanno eseguiti nel Test Runner di Unity.
+Versioni supportate: 2021.3 LTS, 2022.3 LTS, Unity 6 (6000.x) e successive.
+
+Come è verificata:
+
+1. Il sorgente C# ufficiale di Unity (UnityCsReference, branch 2021.3, 2022.1, 2022.3, 6000.0, 6000.3, 6000.7) è stato usato
+   per controllare che ogni API usata esista e non sia marcata `[Obsolete]`.
+2. Il package viene compilato, con i warning trattati come errori, contro gli assembly reali degli editor
+   2021.3.45f2, 2022.3.62f3, 6000.0.84f1 e 6000.6.4f1 (`Tests~/UnityCompileCheck/compile_matrix.sh`).
+
+Cosa è emerso e come è stato risolto:
+
+- `Object.GetInstanceID()` è un errore di compilazione da Unity 6000.6 (sostituito da `GetEntityId`).
+  Il tool non lo usa più: la cache identifica le texture senza file con una tabella debole interna.
+- Da Unity 2022.1 l'importer ha `swizzle` e `flipGreenChannel`: un preset di progetto potrebbe rimappare i canali
+  nell'import temporaneo. Il tool li forza ai valori neutri e li verifica, con `#if UNITY_2022_1_OR_NEWER`.
+- `NamedBuildTarget` (2021.2+) è usato dietro `#if UNITY_2021_2_OR_NEWER`.
+
+Per una nuova versione di Unity basta lanciare `compile_matrix.sh <versione>`.
+
+## 10. Limiti noti (onesti)
+
+- Il codice è compilato contro gli assembly reali di 2021.3, 2022.3 e Unity 6 e il core è testato fuori dall'editor
+  (codec confrontati con Pillow/OpenEXR). Compilare non significa eseguire: i test di integrazione con l'AssetDatabase
+  reale e l'interfaccia vanno provati nell'editor (Test Runner).
 - Lettura via importer: risoluzione massima 16384 (limite di Unity).
 - PSD: Unity legge l'immagine composita (livelli uniti), come qualsiasi texture PSD in Unity.
 - I ridimensionamenti e le conversioni sRGB in 8 bit cambiano i dati per natura: per questo sono sempre segnalati.

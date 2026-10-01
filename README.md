@@ -4,9 +4,15 @@ Pack, swap, split, invert and remap texture channels in Unity without losing qua
 
 Most channel packers read the texture Unity already imported, which is compressed, often downscaled to 2048 and sometimes altered (alpha dilation, normal map swizzle). This tool reads **the original source file**, so a channel you copy arrives bit for bit identical.
 
+## Compatibility
+
+Unity 2021.3 LTS, 2022.3 LTS and Unity 6 (6000.x). Built-in, URP and HDRP: the tool works on files, not on the render pipeline.
+
+The package is compiled with zero warnings against the real editor assemblies of Unity 2021.3.45f2, 2022.3.62f3, 6000.0.84f1 and 6000.6.4f1 (`Tests~/UnityCompileCheck/compile_matrix.sh` repeats the check for any version). Version specific APIs are behind `#if UNITY_..._OR_NEWER`.
+
 ## Install
 
-Unity 2021.3 or newer. Git must be installed on your machine.
+Git must be installed on your machine.
 
 1. Open **Window > Package Manager**.
 2. Click **+ > Add package from git URL...**
@@ -127,6 +133,12 @@ python3 Tests~/Reference/reference_check.py    # pip install pillow numpy pypng 
 ```
 
 The reference check compares the decoders and encoders with pypng, Pillow and the official OpenEXR library on more than 280 files.
+
+**Unity API compatibility** (downloads only the managed assemblies of each editor, needs curl, xz and the .NET 8 SDK):
+
+```
+Tests~/UnityCompileCheck/compile_matrix.sh 2021.3 2022.3 6000.0 6000.6
+```
 
 ## Limits
 

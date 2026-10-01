@@ -117,13 +117,13 @@ namespace DAVFX.TextureChannelPacker
                     throw new PackException($"{ext} files are not imported by Unity's TextureImporter in this project, so they cannot be read losslessly.");
 
                 var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(tempPath);
-                string problem = usedTemplate ? Verify(texture, probe, expectedFormat) : "first import";
+                string problem = usedTemplate ? Verify(texture, probe, expectedFormat) ?? VerifyImporter(importer) : "first import";
                 if (problem != null)
                 {
                     ConfigureLossless(importer, expectedFormat);
                     importer.SaveAndReimport();
                     texture = AssetDatabase.LoadAssetAtPath<Texture2D>(tempPath);
-                    problem = Verify(texture, probe, expectedFormat);
+                    problem = Verify(texture, probe, expectedFormat) ?? VerifyImporter(importer);
                     if (problem != null)
                         throw new PackException($"Lossless read failed ({problem}). A project AssetPostprocessor or preset may be overriding texture import settings.");
                     s_MetaTemplates[templateKey] = File.ReadAllText(tempFull + ".meta");
@@ -161,6 +161,18 @@ namespace DAVFX.TextureChannelPacker
             return null;
         }
 
+        static string VerifyImporter(TextureImporter importer)
+        {
+            if (importer.sRGBTexture || importer.alphaIsTransparency || importer.textureType != TextureImporterType.Default)
+                return "color space, alpha or type changed";
+#if UNITY_2022_1_OR_NEWER
+            if (importer.flipGreenChannel || importer.swizzleR != TextureImporterSwizzle.R || importer.swizzleG != TextureImporterSwizzle.G ||
+                importer.swizzleB != TextureImporterSwizzle.B || importer.swizzleA != TextureImporterSwizzle.A)
+                return "channel swizzle changed";
+#endif
+            return null;
+        }
+
         static void ConfigureLossless(TextureImporter importer, TextureFormat format)
         {
             importer.textureType = TextureImporterType.Default;
@@ -177,6 +189,14 @@ namespace DAVFX.TextureChannelPacker
             importer.maxTextureSize = SizeSettings.MaxSize;
             importer.textureCompression = TextureImporterCompression.Uncompressed;
             importer.crunchedCompression = false;
+#if UNITY_2022_1_OR_NEWER
+            // A project preset could remap channels at import; force the identity mapping.
+            importer.flipGreenChannel = false;
+            importer.swizzleR = TextureImporterSwizzle.R;
+            importer.swizzleG = TextureImporterSwizzle.G;
+            importer.swizzleB = TextureImporterSwizzle.B;
+            importer.swizzleA = TextureImporterSwizzle.A;
+#endif
 
             var importerFormat = format == TextureFormat.RGBAFloat ? TextureImporterFormat.RGBAFloat : TextureImporterFormat.RGBA32;
             foreach (string platform in PlatformNames())

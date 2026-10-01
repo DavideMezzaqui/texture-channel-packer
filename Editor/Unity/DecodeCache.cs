@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.CompilerServices;
 using UnityEditor;
 using UnityEngine;
 
@@ -101,7 +102,21 @@ namespace DAVFX.TextureChannelPacker
                     return path + "|" + info.LastWriteTimeUtc.Ticks + "|" + info.Length;
                 }
             }
-            return "object|" + texture.GetInstanceID() + "|" + texture.updateCount;
+            // Textures without a file: identify the object itself (GetInstanceID is removed in recent Unity 6 versions).
+            if (!s_ObjectIds.TryGetValue(texture, out var id))
+            {
+                id = new ObjectId { Value = ++s_NextObjectId };
+                s_ObjectIds.Add(texture, id);
+            }
+            return "object|" + id.Value + "|" + texture.updateCount;
         }
+
+        sealed class ObjectId
+        {
+            public long Value;
+        }
+
+        static readonly ConditionalWeakTable<Texture2D, ObjectId> s_ObjectIds = new ConditionalWeakTable<Texture2D, ObjectId>();
+        static long s_NextObjectId;
     }
 }

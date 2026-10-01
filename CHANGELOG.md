@@ -17,3 +17,5 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Project window actions: Open in Channel Packer, Split Channels, Flip Normal Green, Remove Alpha, Invert RGB.
 - Public API (`ChannelPacker`, `ChannelPackerView`) for scripting and for embedding the UI in other tools.
 - EditMode tests and an external .NET harness that checks the codecs against pypng, Pillow and OpenEXR.
+- Compatibility with Unity 2021.3, 2022.3 and Unity 6, verified by compiling against the real editor assemblies of 2021.3.45f2, 2022.3.62f3, 6000.0.84f1 and 6000.6.4f1 (`compile_matrix.sh`).
+- On Unity 2022.1+ the temporary lossless import also forces the identity channel swizzle and disables green flipping, so project presets cannot alter the data.
