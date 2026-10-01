@@ -89,7 +89,7 @@ Empty slots in the material presets fall back to Unity's defaults (Metallic 0, O
 | EXR, HDR, PSD, TIFF, BMP, GIF and others | a temporary copy is imported uncompressed, full size, readable and linear, read, verified and deleted |
 
 - The source file and its .meta are never modified while reading.
-- After a temporary import the tool checks format, size and mip count. If something in the project (an AssetPostprocessor, a preset) changed them, you get an error instead of a silently degraded result.
+- After a temporary import the tool checks format, size, mip count and (Unity 2022.1+) channel swizzle. If something in the project (an AssetPostprocessor, a default Preset, the Build Settings Asset Import Overrides) changed them, you get an error that says why, instead of a silently degraded result. A failed read is retried when you assign the texture again, or after 30 seconds.
 - Values are kept as 32-bit floats in the form `k / (2^bits - 1)`, which converts back to the exact same integers for 8 and 16-bit data.
 - Every step that changes data (resizing, lower bit depth, HDR clamping, sRGB conversion in 8-bit, lossy sources) is listed before you pack.
 

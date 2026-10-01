@@ -50,6 +50,7 @@ namespace DAVFX.TextureChannelPacker
         PixelImage[] m_Images = new PixelImage[0];
         string[] m_SlotErrors = new string[0];
         bool[] m_Used = new bool[0];
+        bool[] m_EmptyNeedsTexture = new bool[0];
         PackPlan m_Plan;
         PixelImage m_PreviewImage;
         string m_PreviewError;
@@ -235,6 +236,13 @@ namespace DAVFX.TextureChannelPacker
             }
 
             m_Used = ChannelPacker.UsedSlots(state.recipe, n);
+            // An empty slot is only an error when some channel reads it without a default value.
+            m_EmptyNeedsTexture = new bool[n];
+            state.recipe.ForEachActiveOperand(op =>
+            {
+                if (op.kind == OperandKind.Texture && !op.hasFallback && op.input >= 0 && op.input < n)
+                    m_EmptyNeedsTexture[op.input] = true;
+            });
             var infos = new InputInfo[n];
             var hasTexture = new bool[n];
             for (int i = 0; i < n; i++)
@@ -505,8 +513,12 @@ namespace DAVFX.TextureChannelPacker
                 info = $"{image.Width} x {image.Height}  ·  {image.SourceDescription}{(image.IsLossySource ? "  ·  lossy source" : string.Empty)}";
             else if (slot.texture != null)
                 info = "Reading...";
+            else if (!used)
+                info = "Empty";
+            else if (i < m_EmptyNeedsTexture.Length && m_EmptyNeedsTexture[i])
+                info = "Empty: a channel needs a texture here";
             else
-                info = used ? "Empty: the channel default value is used" : "Empty";
+                info = "Empty: the channel default value is used";
 
             EditorGUILayout.BeginHorizontal();
             GUILayout.Space(128);

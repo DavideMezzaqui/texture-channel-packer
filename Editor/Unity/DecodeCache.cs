@@ -85,6 +85,29 @@ namespace DAVFX.TextureChannelPacker
         /// <summary>Memory held by decoded images.</summary>
         public static long CachedBytes => s_Bytes;
 
+        internal static int EntryCount => s_Entries.Count;
+
+        /// <summary>
+        /// Drops everything cached for a file. Called after the tool writes it: the file time and size are not enough
+        /// on file systems with one or two second timestamps (HFS+, FAT, exFAT) when a file is rewritten quickly.
+        /// </summary>
+        public static void Invalidate(string assetPath)
+        {
+            if (string.IsNullOrEmpty(assetPath))
+                return;
+            string prefix = assetPath + "|";
+            for (var node = s_Entries.First; node != null;)
+            {
+                var next = node.Next;
+                if (node.Value.Key.StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    s_Bytes -= node.Value.Image?.ByteSize ?? 0;
+                    s_Entries.Remove(node);
+                }
+                node = next;
+            }
+        }
+
         /// <summary>Forgets a failed read so the next request tries again (the user assigned the texture again).</summary>
         public static void ForgetFailure(Texture2D texture)
         {

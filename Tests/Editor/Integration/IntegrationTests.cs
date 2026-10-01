@@ -242,6 +242,20 @@ namespace DAVFX.TextureChannelPacker.Tests
         }
 
         [Test]
+        public void WritingAFile_DropsItsCachedImage()
+        {
+            // File time and size can stay the same on 1-2 s timestamp file systems: the write itself must invalidate.
+            var texture = WriteAndImport("rewrite.png", PngCodec.Encode(TestImages.Noise(16, 16, 8, false, false, 50), OutputLayout.RGB, 8));
+            DecodeCache.Get(texture);
+            Assert.AreEqual(1, DecodeCache.EntryCount);
+
+            var output = new OutputSettings { folder = Folder, fileName = "rewrite", format = OutputFormat.PNG, backupOnOverwrite = false };
+            TextureOutputWriter.Write(TestImages.Noise(16, 16, 8, false, false, 51), OutputLayout.RGB, output, OutputBitDepth.Bits8, null, out _);
+            Assert.AreEqual(0, DecodeCache.EntryCount, "the old decoded image is gone");
+            TestImages.AssertImageExact(TestImages.Noise(16, 16, 8, false, false, 51), DecodeCache.Get(texture), 255);
+        }
+
+        [Test]
         public void FailedReads_AreRemembered_SoTheWindowCannotReimportForever()
         {
             var texture = WriteAndImport("fail.png", PngCodec.Encode(TestImages.GrayNoise(4, 4, 1), OutputLayout.Grayscale, 8));

@@ -34,6 +34,7 @@ namespace DAVFX.TextureChannelPacker
                 backupPath = Backup(full);
 
             File.WriteAllBytes(full, bytes);
+            DecodeCache.Invalidate(assetPath);
             AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
 
             if (!existed)
