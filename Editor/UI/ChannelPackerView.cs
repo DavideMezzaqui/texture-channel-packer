@@ -497,7 +497,7 @@ namespace DAVFX.TextureChannelPacker
             if (!empty)
                 return null;
             return op.hasFallback
-                ? $"Input {PackEngine.SlotName(op.input)} is empty: uses {op.fallback:0.###} ({ColorMath.Quantize(op.fallback, 255)}/255)"
+                ? $"Input {PackEngine.SlotName(op.input)} is empty: uses {op.fallback.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)} ({ColorMath.Quantize(op.fallback, 255)}/255)"
                 : $"Input {PackEngine.SlotName(op.input)} is empty";
         }
 

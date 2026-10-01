@@ -110,7 +110,7 @@ namespace DAVFX.TextureChannelPacker
                     if (op.hasFallback)
                     {
                         if (!anyFallback)
-                            plan.Add(IssueSeverity.Info, $"Input {PackEngine.SlotName(op.input)} is empty: its default value ({Format255(op.fallback)}) is used.");
+                            plan.Add(IssueSeverity.Info, $"Input {PackEngine.SlotName(op.input)} is empty: its default value {Format255(op.fallback)} is used.");
                         anyFallback = true;
                     }
                     else
@@ -202,7 +202,7 @@ namespace DAVFX.TextureChannelPacker
 
         static string Format255(float value)
         {
-            return $"{value:0.###} / {ColorMath.Quantize(value, 255)}";
+            return $"{value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)} ({ColorMath.Quantize(value, 255)}/255)";
         }
     }
 }
