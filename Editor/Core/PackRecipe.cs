@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace DAVFX.TextureChannelPacker
 {
@@ -164,10 +165,10 @@ namespace DAVFX.TextureChannelPacker
         public OutputLayout layout = OutputLayout.RGBA;
         public ChannelRecipe[] channels = CreateDefaultChannels();
 
-        static readonly int[] s_Rgba = { 0, 1, 2, 3 };
-        static readonly int[] s_Rgb = { 0, 1, 2 };
-        static readonly int[] s_Gray = { 0 };
-        static readonly int[] s_GrayAlpha = { 0, 3 };
+        static readonly IReadOnlyList<int> s_Rgba = Array.AsReadOnly(new[] { 0, 1, 2, 3 });
+        static readonly IReadOnlyList<int> s_Rgb = Array.AsReadOnly(new[] { 0, 1, 2 });
+        static readonly IReadOnlyList<int> s_Gray = Array.AsReadOnly(new[] { 0 });
+        static readonly IReadOnlyList<int> s_GrayAlpha = Array.AsReadOnly(new[] { 0, 3 });
 
         public static ChannelRecipe[] CreateDefaultChannels()
         {
@@ -180,8 +181,8 @@ namespace DAVFX.TextureChannelPacker
             };
         }
 
-        /// <summary>Channel slots written by a layout.</summary>
-        public static int[] ActiveChannels(OutputLayout layout)
+        /// <summary>Channel slots written by a layout (shared, read-only).</summary>
+        public static IReadOnlyList<int> ActiveChannels(OutputLayout layout)
         {
             switch (layout)
             {
