@@ -200,7 +200,7 @@ namespace DAVFX.TextureChannelPacker.Codecs
                     int a, b;
                     if (int.TryParse(parts[1], out a) && int.TryParse(parts[3], out b))
                     {
-                        bool yFirst = parts[0].EndsWith("Y");
+                        bool yFirst = parts[0].EndsWith("Y", StringComparison.Ordinal);
                         result.Height = yFirst ? a : b;
                         result.Width = yFirst ? b : a;
                     }

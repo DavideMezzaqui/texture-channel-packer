@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using UnityEditor;
 
@@ -10,7 +11,7 @@ namespace DAVFX.TextureChannelPacker
         {
             if (string.IsNullOrEmpty(assetPath))
                 return null;
-            if (assetPath.StartsWith("Packages/"))
+            if (assetPath.StartsWith("Packages/", StringComparison.Ordinal))
             {
                 var info = UnityEditor.PackageManager.PackageInfo.FindForAssetPath(assetPath);
                 if (info != null && !string.IsNullOrEmpty(info.resolvedPath))
@@ -49,7 +50,7 @@ namespace DAVFX.TextureChannelPacker
         public static string WritableFolderOf(string assetPath)
         {
             string folder = FolderOf(assetPath);
-            return folder == "Assets" || folder.StartsWith("Assets/") ? folder : "Assets";
+            return folder == "Assets" || folder.StartsWith("Assets/", StringComparison.Ordinal) ? folder : "Assets";
         }
     }
 }

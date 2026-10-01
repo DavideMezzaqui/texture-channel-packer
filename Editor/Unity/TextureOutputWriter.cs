@@ -46,7 +46,7 @@ namespace DAVFX.TextureChannelPacker
         {
             // One folder per backup: two overwrites in the same second must not replace the first backup.
             string root = Path.GetFullPath(BackupFolder);
-            string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss_fff");
+            string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss_fff", System.Globalization.CultureInfo.InvariantCulture);
             string folder = Path.Combine(root, stamp);
             for (int i = 1; Directory.Exists(folder); i++)
                 folder = Path.Combine(root, stamp + "_" + i);

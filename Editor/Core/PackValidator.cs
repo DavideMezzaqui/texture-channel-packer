@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace DAVFX.TextureChannelPacker
@@ -215,7 +216,7 @@ namespace DAVFX.TextureChannelPacker
         {
             if (string.IsNullOrWhiteSpace(fileName))
                 return "Output file name is empty.";
-            if (fileName.IndexOfAny(s_InvalidNameChars) >= 0 || fileName.Trim() != fileName || fileName.EndsWith("."))
+            if (fileName.IndexOfAny(s_InvalidNameChars) >= 0 || fileName.Trim() != fileName || fileName.EndsWith(".", StringComparison.Ordinal))
                 return "Output file name contains invalid characters, or starts or ends with a space or a dot.";
             string clean = new OutputSettings { fileName = fileName }.CleanFileName;
             if (IsIgnoredByUnity(clean))
@@ -232,14 +233,14 @@ namespace DAVFX.TextureChannelPacker
             string stem = (dot >= 0 ? name.Substring(0, dot) : name).TrimEnd().ToUpperInvariant();
             if (stem == "CON" || stem == "PRN" || stem == "AUX" || stem == "NUL")
                 return true;
-            return stem.Length == 4 && (stem.StartsWith("COM") || stem.StartsWith("LPT")) && stem[3] >= '1' && stem[3] <= '9';
+            return stem.Length == 4 && (stem.StartsWith("COM", StringComparison.Ordinal) || stem.StartsWith("LPT", StringComparison.Ordinal)) && stem[3] >= '1' && stem[3] <= '9';
         }
 
         /// <summary>Why an output folder cannot be used, or null when it is fine. Empty means Assets.</summary>
         public static string FolderError(string folder)
         {
             folder = OutputSettings.NormalizeFolder(folder);
-            if (folder != "Assets" && !folder.StartsWith("Assets/"))
+            if (folder != "Assets" && !folder.StartsWith("Assets/", StringComparison.Ordinal))
                 return "Output folder must be inside Assets.";
             if (("/" + folder + "/").Contains("/../") || ("/" + folder + "/").Contains("/./"))
                 return "Output folder cannot contain '.' or '..' segments.";
@@ -258,7 +259,7 @@ namespace DAVFX.TextureChannelPacker
         /// <summary>Unity does not import hidden names: starting with a dot or ending with a tilde.</summary>
         static bool IsIgnoredByUnity(string name)
         {
-            return name.StartsWith(".") || name.EndsWith("~");
+            return name.StartsWith(".", StringComparison.Ordinal) || name.EndsWith("~", StringComparison.Ordinal);
         }
 
         static string Format255(float value)
