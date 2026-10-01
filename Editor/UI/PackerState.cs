@@ -140,6 +140,8 @@ namespace DAVFX.TextureChannelPacker
                 return;
             Sanitize();
             var candidates = textures.Where(t => t != null).Distinct().ToList();
+            foreach (var texture in candidates)
+                DecodeCache.ForgetFailure(texture); // assigning again retries a read that failed
             if (replaceAll)
             {
                 foreach (var slot in inputs)

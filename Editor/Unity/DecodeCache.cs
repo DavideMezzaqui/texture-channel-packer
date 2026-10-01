@@ -16,15 +16,33 @@ namespace DAVFX.TextureChannelPacker
         /// <summary>Memory budget for cached images. Older entries are dropped first.</summary>
         public static long BudgetBytes = 1024L * 1024 * 1024;
 
+        /// <summary>
+        /// A failed read is remembered for this long. Reading through Unity's importer changes the project, which
+        /// refreshes the window, which would read again: without this the editor could re-import forever.
+        /// </summary>
+        public static double FailureRetrySeconds = 30;
+
+        /// <summary>
+        /// Images used this recently are never evicted, even over budget: the window needs all its inputs at once,
+        /// and evicting one would make the next refresh read it again (and, through the importer, refresh again).
+        /// </summary>
+        public static double KeepRecentSeconds = 60;
+
         sealed class Entry
         {
             public string Key;
             public PixelImage Image;
             public PixelImage Preview;
             public int PreviewSize;
+            public string Error;
+            public double FailedAt;
+            public double LastUsed;
         }
 
         static readonly LinkedList<Entry> s_Entries = new LinkedList<Entry>();
+
+        /// <summary>Reads a texture; replaced by tests to simulate failures.</summary>
+        internal static Func<Texture2D, PixelImage> Loader = TextureSourceLoader.Load;
         static long s_Bytes;
 
         public static PixelImage Get(Texture2D texture)
@@ -48,15 +66,14 @@ namespace DAVFX.TextureChannelPacker
         /// <summary>Returns the cached image without decoding, or null.</summary>
         public static PixelImage Peek(Texture2D texture)
         {
-            if (texture == null)
-                return null;
-            string key = KeyOf(texture);
-            foreach (var entry in s_Entries)
-            {
-                if (entry.Key == key)
-                    return entry.Image;
-            }
-            return null;
+            return Find(texture)?.Image;
+        }
+
+        /// <summary>True when reading this texture now would not touch the disk (decoded, or failed recently).</summary>
+        public static bool IsKnown(Texture2D texture)
+        {
+            var entry = Find(texture);
+            return entry != null && (entry.Error == null || !Expired(entry));
         }
 
         public static void Clear()
@@ -65,28 +82,83 @@ namespace DAVFX.TextureChannelPacker
             s_Bytes = 0;
         }
 
+        /// <summary>Memory held by decoded images.</summary>
+        public static long CachedBytes => s_Bytes;
+
+        /// <summary>Forgets a failed read so the next request tries again (the user assigned the texture again).</summary>
+        public static void ForgetFailure(Texture2D texture)
+        {
+            var entry = texture != null ? Find(texture) : null;
+            if (entry != null && entry.Error != null)
+                s_Entries.Remove(entry); // failed entries hold no image: the byte count does not change
+        }
+
+        static Entry Find(Texture2D texture)
+        {
+            if (texture == null)
+                return null;
+            string key = KeyOf(texture);
+            foreach (var entry in s_Entries)
+            {
+                if (entry.Key == key)
+                    return entry;
+            }
+            return null;
+        }
+
+        static bool Expired(Entry failed)
+        {
+            return EditorApplication.timeSinceStartup - failed.FailedAt > FailureRetrySeconds;
+        }
+
         static Entry GetEntry(Texture2D texture)
         {
             string key = KeyOf(texture);
             for (var node = s_Entries.First; node != null; node = node.Next)
             {
-                if (node.Value.Key == key)
+                if (node.Value.Key != key)
+                    continue;
+                if (node.Value.Error != null)
                 {
+                    if (!Expired(node.Value))
+                        throw new PackException(node.Value.Error);
                     s_Entries.Remove(node);
-                    s_Entries.AddFirst(node);
-                    return node.Value;
+                    break;
                 }
+                s_Entries.Remove(node);
+                s_Entries.AddFirst(node);
+                node.Value.LastUsed = EditorApplication.timeSinceStartup;
+                return node.Value;
             }
 
-            var image = TextureSourceLoader.Load(texture);
-            var created = new Entry { Key = key, Image = image };
+            PixelImage image;
+            try
+            {
+                image = Loader(texture);
+            }
+            catch (PackException e)
+            {
+                s_Entries.AddFirst(new Entry { Key = key, Error = e.Message, FailedAt = EditorApplication.timeSinceStartup });
+                throw;
+            }
+
+            double now = EditorApplication.timeSinceStartup;
+            var created = new Entry { Key = key, Image = image, LastUsed = now };
             s_Entries.AddFirst(created);
             s_Bytes += image.ByteSize;
-            while (s_Bytes > BudgetBytes && s_Entries.Count > 1)
+
+            // Evict the least recently used entries that have not been needed for a while.
+            var candidate = s_Entries.Last;
+            while (s_Bytes > BudgetBytes && candidate != null)
             {
-                var last = s_Entries.Last;
-                s_Bytes -= last.Value.Image.ByteSize;
-                s_Entries.RemoveLast();
+                var previous = candidate.Previous;
+                var entry = candidate.Value;
+                if (entry != created && (entry.Error != null || now - entry.LastUsed > KeepRecentSeconds))
+                {
+                    s_Bytes -= entry.Image?.ByteSize ?? 0;
+                    s_Entries.Remove(candidate);
+                }
+                candidate = previous;
             }
             return created;
         }

@@ -188,7 +188,7 @@ namespace DAVFX.TextureChannelPacker
                     var texture = state.inputs[i].texture;
                     if (texture == null)
                         continue;
-                    if (DecodeCache.Peek(texture) == null)
+                    if (!DecodeCache.IsKnown(texture))
                     {
                         EditorUtility.DisplayProgressBar(Title, "Reading " + texture.name, (float)i / n);
                         progress = true;
@@ -200,7 +200,7 @@ namespace DAVFX.TextureChannelPacker
                 m_SplitError = null;
                 if (state.mode == PackerMode.Split && state.splitSource != null)
                 {
-                    if (DecodeCache.Peek(state.splitSource) == null)
+                    if (!DecodeCache.IsKnown(state.splitSource))
                     {
                         EditorUtility.DisplayProgressBar(Title, "Reading " + state.splitSource.name, 0.5f);
                         progress = true;
@@ -499,6 +499,8 @@ namespace DAVFX.TextureChannelPacker
 
         static void SetSlotTexture(PackerState state, InputSlot slot, Texture2D texture)
         {
+            // Assigning a texture again is how the user asks to retry a read that failed.
+            DecodeCache.ForgetFailure(texture);
             slot.texture = texture;
             state.UpdateAutoName();
         }
@@ -1183,7 +1185,13 @@ namespace DAVFX.TextureChannelPacker
             Separator();
             var source = (Texture2D)EditorGUILayout.ObjectField(state.splitSource, typeof(Texture2D), false, GUILayout.Height(18));
             if (source != state.splitSource)
-                Defer(() => state.splitSource = source);
+            {
+                Defer(() =>
+                {
+                    DecodeCache.ForgetFailure(source);
+                    state.splitSource = source;
+                });
+            }
             if (m_SplitError != null)
                 EditorGUILayout.HelpBox(m_SplitError, MessageType.Error);
             else if (m_SplitImage != null && state.splitSource != null)

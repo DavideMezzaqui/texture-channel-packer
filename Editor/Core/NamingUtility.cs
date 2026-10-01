@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace DAVFX.TextureChannelPacker
 {
@@ -106,15 +107,21 @@ namespace DAVFX.TextureChannelPacker
             var taken = new HashSet<int>();
             if (slotKeywords != null)
             {
-                for (int slot = 0; slot < slotCount && slot < slotKeywords.Count; slot++)
+                var names = candidates.Select(Analyze).ToList();
+                // Strong matches first for every slot (the map suffix of the name), then weak ones, so a material
+                // name that contains a keyword ("T_Metal_Plate_AO") cannot steal a slot from a real suffix match.
+                for (int pass = 0; pass < 2; pass++)
                 {
-                    if (occupied[slot] || slotKeywords[slot] == null || slotKeywords[slot].Length == 0)
-                        continue;
-                    int match = FindBestMatch(candidates, slotKeywords[slot], taken);
-                    if (match >= 0)
+                    for (int slot = 0; slot < slotCount && slot < slotKeywords.Count; slot++)
                     {
-                        result[slot] = match;
-                        taken.Add(match);
+                        if (occupied[slot] || result[slot] >= 0 || slotKeywords[slot] == null || slotKeywords[slot].Length == 0)
+                            continue;
+                        int match = pass == 0 ? FindStrong(names, slotKeywords[slot], taken) : FindWeak(names, slotKeywords[slot], taken);
+                        if (match >= 0)
+                        {
+                            result[slot] = match;
+                            taken.Add(match);
+                        }
                     }
                 }
                 if (taken.Count > 0)
@@ -132,35 +139,76 @@ namespace DAVFX.TextureChannelPacker
             return result.ToArray();
         }
 
-        /// <summary>Index of the candidate whose name best matches any keyword, or -1.</summary>
+        /// <summary>Index of the candidate whose name best matches any keyword for a single slot, or -1.</summary>
         public static int FindBestMatch(IReadOnlyList<string> candidateNames, IReadOnlyList<string> keywords, ICollection<int> taken)
         {
-            if (keywords == null || keywords.Count == 0)
+            if (keywords == null || keywords.Count == 0 || candidateNames == null)
                 return -1;
-            // Earlier keywords win, then exact token matches over suffix matches.
-            for (int k = 0; k < keywords.Count; k++)
+            var names = candidateNames.Select(Analyze).ToList();
+            int strong = FindStrong(names, keywords, taken);
+            return strong >= 0 ? strong : FindWeak(names, keywords, taken);
+        }
+
+        /// <summary>Trailing tokens that describe the file, not the map: resolution, version, normal convention...</summary>
+        static readonly Regex s_NoiseToken = new Regex(@"^(\d+k?|\d+x\d+|v\d+|dx|gl|ogl|directx|opengl|final|lod\d*|tex|texture|map)$", RegexOptions.CultureInvariant);
+
+        sealed class NameInfo
+        {
+            public string[] Tokens;
+            /// <summary>Last meaningful token, e.g. "ao" in "T_Rock_AO_2K".</summary>
+            public string MapToken;
+            /// <summary>Map token joined with the previous one, e.g. "basecolor" in "T_Rock_Base_Color".</summary>
+            public string MapPair;
+            /// <summary>The map token is a known map keyword: the name says clearly what the map is.</summary>
+            public bool KnownMap;
+        }
+
+        static NameInfo Analyze(string name)
+        {
+            var tokens = Tokenize(name);
+            int last = tokens.Length - 1;
+            while (last > 0 && s_NoiseToken.IsMatch(tokens[last]))
+                last--;
+            var info = new NameInfo
             {
-                string keyword = keywords[k];
-                for (int i = 0; i < candidateNames.Count; i++)
+                Tokens = tokens,
+                MapToken = last >= 0 ? tokens[last] : string.Empty,
+                MapPair = last >= 1 ? tokens[last - 1] + tokens[last] : string.Empty
+            };
+            var known = PackPresets.AllKeywords;
+            info.KnownMap = known.Contains(info.MapToken) || known.Contains(info.MapPair);
+            return info;
+        }
+
+        /// <summary>The map suffix of the name is the keyword. Earlier keywords win.</summary>
+        static int FindStrong(IReadOnlyList<NameInfo> names, IReadOnlyList<string> keywords, ICollection<int> taken)
+        {
+            foreach (string keyword in keywords)
+            {
+                for (int i = 0; i < names.Count; i++)
                 {
                     if (taken != null && taken.Contains(i))
                         continue;
-                    var tokens = Tokenize(candidateNames[i]);
-                    if (tokens.Contains(keyword))
+                    if (names[i].MapToken == keyword || names[i].MapPair == keyword)
                         return i;
                 }
             }
-            for (int k = 0; k < keywords.Count; k++)
+            return -1;
+        }
+
+        /// <summary>
+        /// Keyword elsewhere in the name ("T_Rock_Normal_Strong") or glued to it ("RockMetallic"). Only for names whose
+        /// suffix is not already a known map, and glued matches need a long keyword so "T_Helmet" is not metallic.
+        /// </summary>
+        static int FindWeak(IReadOnlyList<NameInfo> names, IReadOnlyList<string> keywords, ICollection<int> taken)
+        {
+            foreach (string keyword in keywords)
             {
-                string keyword = keywords[k];
-                if (keyword.Length < 3)
-                    continue;
-                for (int i = 0; i < candidateNames.Count; i++)
+                for (int i = 0; i < names.Count; i++)
                 {
-                    if (taken != null && taken.Contains(i))
+                    if ((taken != null && taken.Contains(i)) || names[i].KnownMap)
                         continue;
-                    var tokens = Tokenize(candidateNames[i]);
-                    if (tokens.Length > 0 && tokens[tokens.Length - 1].EndsWith(keyword))
+                    if (names[i].Tokens.Contains(keyword) || (keyword.Length >= 6 && names[i].MapToken.EndsWith(keyword, StringComparison.Ordinal)))
                         return i;
                 }
             }

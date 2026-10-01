@@ -270,6 +270,34 @@ namespace DAVFX.TextureChannelPacker.Tests
         }
 
         [Test]
+        public void AssignSlots_MaterialNamesContainingKeywords_DoNotStealSlots()
+        {
+            var preset = PackPresets.Find("HDRP Mask Map (from Roughness)");
+            var free = new[] { false, false, false, false };
+
+            // "Metal" is part of the material name, not the map type.
+            var plate = new List<string> { "T_Metal_Plate_Roughness", "T_Metal_Plate_AO" };
+            CollectionAssert.AreEqual(new[] { -1, 1, -1, 0 }, NamingUtility.AssignSlots(plate, preset.SlotKeywords, free, 8));
+
+            // Resolution and convention suffixes are ignored when reading the map type.
+            var sized = new List<string> { "T_Rock_AO_2K", "T_Rock_Roughness_2K", "T_Rock_Metallic_v2" };
+            CollectionAssert.AreEqual(new[] { 2, 0, -1, 1 }, NamingUtility.AssignSlots(sized, preset.SlotKeywords, free, 8));
+
+            // Glued names still work with long keywords, short ones do not create false matches.
+            var glued = new List<string> { "RockRoughness", "RockMetallic" };
+            CollectionAssert.AreEqual(new[] { 1, -1, -1, 0 }, NamingUtility.AssignSlots(glued, preset.SlotKeywords, free, 8));
+            Assert.AreEqual(-1, NamingUtility.FindBestMatch(new List<string> { "T_Helmet" }, preset.SlotKeywords[0], null), "helmet is not metallic");
+        }
+
+        [Test]
+        public void AssignSlots_TwoWordSuffixes_AndConventionTokens()
+        {
+            var detail = PackPresets.Find("HDRP Detail Map");
+            var names = new List<string> { "T_Base_Normal_DX", "T_Rock_Base_Color", "T_Rock_Smoothness" };
+            CollectionAssert.AreEqual(new[] { 1, 0, 2 }, NamingUtility.AssignSlots(names, detail.SlotKeywords, new[] { false, false, false }, 8));
+        }
+
+        [Test]
         public void AutoAssign_SingleLetterSuffixes()
         {
             var names = new List<string> { "Wall_N", "Wall_D" };

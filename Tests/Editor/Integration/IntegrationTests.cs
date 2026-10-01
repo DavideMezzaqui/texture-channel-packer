@@ -242,6 +242,65 @@ namespace DAVFX.TextureChannelPacker.Tests
         }
 
         [Test]
+        public void FailedReads_AreRemembered_SoTheWindowCannotReimportForever()
+        {
+            var texture = WriteAndImport("fail.png", PngCodec.Encode(TestImages.GrayNoise(4, 4, 1), OutputLayout.Grayscale, 8));
+            int calls = 0;
+            var original = DecodeCache.Loader;
+            DecodeCache.Loader = t =>
+            {
+                calls++;
+                throw new PackException("simulated failure");
+            };
+            try
+            {
+                Assert.Throws<PackException>(() => DecodeCache.Get(texture));
+                Assert.Throws<PackException>(() => DecodeCache.Get(texture));
+                Assert.AreEqual(1, calls, "the second request reuses the remembered failure");
+                Assert.IsTrue(DecodeCache.IsKnown(texture));
+
+                DecodeCache.ForgetFailure(texture);
+                Assert.Throws<PackException>(() => DecodeCache.Get(texture));
+                Assert.AreEqual(2, calls, "assigning the texture again retries");
+            }
+            finally
+            {
+                DecodeCache.Loader = original;
+                DecodeCache.Clear();
+            }
+            Assert.AreEqual(4, DecodeCache.Get(texture).Width, "the real loader works again");
+        }
+
+        [Test]
+        public void ImagesInUse_AreNotEvicted_EvenOverBudget()
+        {
+            var a = WriteAndImport("a_big.png", PngCodec.Encode(TestImages.GrayNoise(64, 64, 1), OutputLayout.Grayscale, 8));
+            var b = WriteAndImport("b_big.png", PngCodec.Encode(TestImages.GrayNoise(64, 64, 2), OutputLayout.Grayscale, 8));
+            long budget = DecodeCache.BudgetBytes;
+            int calls = 0;
+            var original = DecodeCache.Loader;
+            DecodeCache.Loader = t =>
+            {
+                calls++;
+                return original(t);
+            };
+            try
+            {
+                DecodeCache.BudgetBytes = 1; // everything is over budget
+                DecodeCache.Get(a);
+                DecodeCache.Get(b);
+                DecodeCache.Get(a);
+                DecodeCache.Get(b);
+                Assert.AreEqual(2, calls, "both images stay cached while they are in use");
+            }
+            finally
+            {
+                DecodeCache.BudgetBytes = budget;
+                DecodeCache.Loader = original;
+            }
+        }
+
+        [Test]
         public void TextureAsset_ReadableUncompressed_IsReadExactly()
         {
             var source = TestImages.Noise(16, 12, 8, false, true, 41);
