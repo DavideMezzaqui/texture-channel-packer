@@ -38,6 +38,22 @@ namespace DAVFX.TextureChannelPacker.Codecs
         {
             if (!IsPng(data))
                 throw new PackException("Not a PNG file.");
+            try
+            {
+                return DecodeChecked(data);
+            }
+            catch (AggregateException e) when (e.InnerException is PackException inner)
+            {
+                throw new PackException(inner.Message, inner);
+            }
+            catch (Exception e) when (!(e is PackException) && !(e is OutOfMemoryException))
+            {
+                throw new PackException($"The PNG file is damaged ({e.GetType().Name}).", e);
+            }
+        }
+
+        static PixelImage DecodeChecked(byte[] data)
+        {
 
             int width = 0, height = 0, bitDepth = 0, colorType = -1, interlace = 0;
             byte[] palette = null;
@@ -56,6 +72,8 @@ namespace DAVFX.TextureChannelPacker.Codecs
 
                 if (type == "IHDR")
                 {
+                    if (length != 13)
+                        throw new PackException("Invalid PNG header (IHDR).");
                     width = ReadInt32BE(data, start);
                     height = ReadInt32BE(data, start + 4);
                     bitDepth = data[start + 8];
@@ -88,6 +106,7 @@ namespace DAVFX.TextureChannelPacker.Codecs
                 throw new PackException("PNG header (IHDR) not found.");
             if (width <= 0 || height <= 0)
                 throw new PackException($"Invalid PNG size {width}x{height}.");
+            CheckSize("PNG", width, height);
             if (interlace > 1)
                 throw new PackException("Unknown PNG interlace method.");
 
@@ -151,6 +170,13 @@ namespace DAVFX.TextureChannelPacker.Codecs
             string layout = colorType == 3 ? "Indexed" : image.LayoutName;
             image.SourceDescription = $"PNG {bitDepth}-bit {layout}";
             return image;
+        }
+
+        /// <summary>Rejects images larger than Unity's texture limit before allocating anything.</summary>
+        internal static void CheckSize(string format, int width, int height)
+        {
+            if (width > SizeSettings.MaxSize || height > SizeSettings.MaxSize)
+                throw new PackException($"The {format} file is {width}x{height}: the maximum supported size is {SizeSettings.MaxSize} pixels per side, like Unity.");
         }
 
         static void CheckDepth(int depth, params int[] allowed)

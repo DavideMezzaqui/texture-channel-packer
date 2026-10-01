@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.CompilerServices;
@@ -92,8 +93,12 @@ namespace DAVFX.TextureChannelPacker
 
         static string KeyOf(Texture2D texture)
         {
+            if (texture == null)
+                throw new ArgumentNullException(nameof(texture));
             string path = AssetDatabase.GetAssetPath(texture);
-            if (!string.IsNullOrEmpty(path) && AssetDatabase.IsMainAsset(texture))
+            // Image files are decoded from disk, so the file identifies the data. Anything else is read from the
+            // imported texture, which changes with its import settings: the key then follows the texture object.
+            if (!string.IsNullOrEmpty(path) && AssetDatabase.IsMainAsset(texture) && TextureSourceLoader.IsImageFile(path))
             {
                 string full = AssetPaths.ToFullPath(path);
                 if (full != null && File.Exists(full))
@@ -108,7 +113,7 @@ namespace DAVFX.TextureChannelPacker
                 id = new ObjectId { Value = ++s_NextObjectId };
                 s_ObjectIds.Add(texture, id);
             }
-            return "object|" + id.Value + "|" + texture.updateCount;
+            return $"object|{id.Value}|{texture.updateCount}|{texture.width}x{texture.height}|{texture.graphicsFormat}";
         }
 
         sealed class ObjectId

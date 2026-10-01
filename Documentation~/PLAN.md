@@ -75,14 +75,15 @@ Estrae i canali di una texture in file grayscale separati, con suffissi configur
 
 | Categoria | Preset | Output |
 |---|---|---|
-| Unity | HDRP/URP Mask Map | R Metallic, G AO, B Detail, A Smoothness |
-| Unity | HDRP/URP Mask Map (da Roughness) | come sopra, A = 1 - Roughness |
+| Unity | HDRP Mask Map | R Metallic, G AO, B Detail, A Smoothness |
+| Unity | HDRP Mask Map (da Roughness) | come sopra, A = 1 - Roughness |
+| Unity | Terrain Layer Mask Map (anche da Roughness) | R Metallic, G AO, B Height, A Smoothness (terrain URP e HDRP) |
 | Unity | URP/Built-in Metallic + Smoothness | RGB Metallic, A Smoothness |
 | Unity | HDRP Detail Map | R Albedo grigio, G Normal Y, B Smoothness, A Normal X |
 | Unity | Albedo + Alpha | RGB Albedo, A Opacità |
 | Unity | Albedo + Smoothness | RGB Albedo, A Smoothness |
 | Unreal / altri | ORM | R AO, G Roughness, B Metallic |
-| Normal | Flip Green (DirectX ↔ OpenGL) | G invertito |
+| Normal | Flip Green (DirectX ↔ OpenGL) | G invertito, alpha conservato se presente |
 | Canali | 4 maschere grayscale in RGBA (VFX) | R, G, B, A da 4 texture |
 | Canali | 3 maschere grayscale in RGB | |
 | Canali | Scambia Rosso ↔ Blu | |
@@ -183,6 +184,10 @@ Ogni caso ha un test automatico. "Esatto" significa confronto bit per bit, nessu
 | U24 | Decoder PNG su 20 varianti generate da Pillow | identico a Pillow | harness |
 | U25 | Encoder PNG/TGA letti da Pillow | identici | harness |
 | U26 | Encoder EXR letto da OpenEXR ufficiale | identico | harness |
+| U27 | File corrotti e troncati (oltre 100.000 varianti) | solo errori chiari, mai eccezioni grezze o blocchi | harness |
+| U28 | 3000 ricette casuali | motore identico a un'implementazione di riferimento ingenua, validatore d'accordo | core |
+| U29 | Set completo di materiale con Use Selection | albedo e normal non finiscono negli slot sbagliati | core + Unity |
+| U30 | Split con suffisso vuoto o duplicato, cartella ignorata da Unity | rifiutato, sorgente intatto | Unity |
 
 ## 7. Ipotesi di utilizzo (scenari reali)
 

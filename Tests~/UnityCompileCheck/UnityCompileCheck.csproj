@@ -23,7 +23,7 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <DefineConstants>UNITY_EDITOR;UNITY_INCLUDE_TESTS;$(UnityDefines)</DefineConstants>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <NoWarn>CS0649;MSB3277;CS1701;CS1702</NoWarn>
+    <NoWarn>MSB3277;CS1701;CS1702</NoWarn>
     <BaseOutputPath>bin/$(UnityLabel)/</BaseOutputPath>
   </PropertyGroup>
   <ItemGroup>

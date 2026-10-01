@@ -19,10 +19,11 @@ namespace DAVFX.TextureChannelPacker
         public static string Write(PixelImage image, OutputLayout layout, OutputSettings settings, OutputBitDepth resolvedDepth, Texture2D importReference, out string backupPath)
         {
             backupPath = null;
+            string pathError = PackValidator.FolderError(settings.folder) ?? PackValidator.FileNameError(settings.fileName);
+            if (pathError != null)
+                throw new PackException(pathError);
             string assetPath = settings.AssetPath;
             string folder = AssetPaths.FolderOf(assetPath);
-            if (folder != "Assets" && !folder.StartsWith("Assets/"))
-                throw new PackException("Output folder must be inside Assets.");
 
             byte[] bytes = ImageEncoder.Encode(image, layout, settings.format, resolvedDepth, settings.tgaRle);
 
@@ -42,7 +43,12 @@ namespace DAVFX.TextureChannelPacker
 
         static string Backup(string fullPath)
         {
-            string folder = Path.Combine(Path.GetFullPath(BackupFolder), DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+            // One folder per backup: two overwrites in the same second must not replace the first backup.
+            string root = Path.GetFullPath(BackupFolder);
+            string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss_fff");
+            string folder = Path.Combine(root, stamp);
+            for (int i = 1; Directory.Exists(folder); i++)
+                folder = Path.Combine(root, stamp + "_" + i);
             Directory.CreateDirectory(folder);
             string target = Path.Combine(folder, Path.GetFileName(fullPath));
             File.Copy(fullPath, target, true);

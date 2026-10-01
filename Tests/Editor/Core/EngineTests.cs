@@ -60,7 +60,7 @@ namespace DAVFX.TextureChannelPacker.Tests
             var ao = TestImages.GrayNoise(64, 32, 11);
             var detail = TestImages.GrayNoise(64, 32, 12);
             var smooth = TestImages.GrayNoise(64, 32, 13);
-            var preset = PackPresets.Find("HDRP - URP Mask Map");
+            var preset = PackPresets.Find("HDRP Mask Map");
             var result = Run(preset.Recipe.Clone(), metallic, ao, detail, smooth);
             var decoded = PngCodec.Decode(PngCodec.Encode(result, OutputLayout.RGBA, 8));
 
@@ -75,7 +75,7 @@ namespace DAVFX.TextureChannelPacker.Tests
         public void U4_MaskMap_WithMissingInputs_UsesUnityDefaults()
         {
             var metallic = TestImages.GrayNoise(8, 8, 20);
-            var preset = PackPresets.Find("HDRP - URP Mask Map");
+            var preset = PackPresets.Find("HDRP Mask Map");
             var result = PackEngine.Evaluate(preset.Recipe.Clone(), new PixelImage[] { metallic, null, null, null }, 8, 8, ResampleFilter.None);
             TestImages.AssertAllEqual(result.G, 1f, "AO default");
             TestImages.AssertAllEqual(result.B, 1f, "Detail default");
@@ -93,7 +93,7 @@ namespace DAVFX.TextureChannelPacker.Tests
         public void U5_RoughnessToSmoothness_Is255MinusValue()
         {
             var rough = TestImages.GrayNoise(16, 16, 30);
-            var preset = PackPresets.Find("HDRP - URP Mask Map (from Roughness)");
+            var preset = PackPresets.Find("HDRP Mask Map (from Roughness)");
             var result = PackEngine.Evaluate(preset.Recipe.Clone(), new PixelImage[] { null, null, null, rough }, 16, 16, ResampleFilter.None);
             for (int i = 0; i < rough.PixelCount; i++)
                 Assert.AreEqual(255 - ColorMath.Quantize(rough.R[i], 255), ColorMath.Quantize(result.A[i], 255));
@@ -109,6 +109,15 @@ namespace DAVFX.TextureChannelPacker.Tests
                 Assert.AreEqual(255 - ColorMath.Quantize(normal.G[i], 255), ColorMath.Quantize(once.G[i], 255));
             var twice = PngCodec.Decode(PngCodec.Encode(Run(preset.Recipe.Clone(), once), OutputLayout.RGB, 8));
             TestImages.AssertImageExact(normal, twice, 255);
+        }
+
+        [Test]
+        public void FlipGreen_KeepsAlpha_WhenTheNormalMapHasOne()
+        {
+            var normal = TestImages.Noise(16, 16, 8, false, true, 44);
+            var result = Run(PackPresets.Find("Flip Green (DirectX - OpenGL)").Recipe.Clone(), normal);
+            Assert.AreSame(normal.A, result.A, "alpha (height, smoothness...) copied untouched");
+            Assert.AreSame(normal.R, result.R);
         }
 
         [Test]

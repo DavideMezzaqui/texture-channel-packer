@@ -76,6 +76,11 @@ namespace DAVFX.TextureChannelPacker
 
         public void Add(IssueSeverity severity, string message)
         {
+            foreach (var issue in Issues)
+            {
+                if (issue.Severity == severity && issue.Message == message)
+                    return;
+            }
             Issues.Add(new PackIssue(severity, message));
         }
     }
@@ -88,8 +93,13 @@ namespace DAVFX.TextureChannelPacker
     {
         // Invalid on at least one OS. Checked everywhere so projects stay portable.
         static readonly char[] s_InvalidNameChars = { '<', '>', ':', '"', '/', '\\', '|', '?', '*', '\0' };
+        static readonly char[] s_InvalidFolderChars = { '<', '>', ':', '"', '|', '?', '*', '\0' };
 
-        public static PackPlan Validate(PackRecipe recipe, IReadOnlyList<InputInfo> inputs, SizeSettings size, OutputSettings output)
+        /// <param name="inputs">Decoded slots. Slots the recipe does not read may be null.</param>
+        /// <param name="slotHasTexture">Which slots hold a texture, used for settings that refer to a slot (copy import settings).
+        /// When null, a slot counts as filled when its info is not null.</param>
+        public static PackPlan Validate(PackRecipe recipe, IReadOnlyList<InputInfo> inputs, SizeSettings size, OutputSettings output,
+            IReadOnlyList<bool> slotHasTexture = null)
         {
             var plan = new PackPlan();
             recipe.Sanitize();
@@ -98,7 +108,6 @@ namespace DAVFX.TextureChannelPacker
 
             var precision = SamplePrecision.UNorm8;
             bool anyLossy = false;
-            bool anyFallback = false;
 
             recipe.ForEachActiveOperand(op =>
             {
@@ -109,9 +118,7 @@ namespace DAVFX.TextureChannelPacker
                 {
                     if (op.hasFallback)
                     {
-                        if (!anyFallback)
-                            plan.Add(IssueSeverity.Info, $"Input {PackEngine.SlotName(op.input)} is empty: its default value {Format255(op.fallback)} is used.");
-                        anyFallback = true;
+                        plan.Add(IssueSeverity.Info, $"Input {PackEngine.SlotName(op.input)} is empty: its default value {Format255(op.fallback)} is used.");
                     }
                     else
                     {
@@ -183,21 +190,60 @@ namespace DAVFX.TextureChannelPacker
                 }
             }
 
-            // File name.
-            if (string.IsNullOrWhiteSpace(output.fileName))
-                plan.Add(IssueSeverity.Error, "Output file name is empty.");
-            else if (output.fileName.IndexOfAny(s_InvalidNameChars) >= 0 || output.fileName.Trim() != output.fileName)
-                plan.Add(IssueSeverity.Error, "Output file name contains invalid characters.");
+            // File name and folder.
+            string nameError = FileNameError(output.fileName);
+            if (nameError != null)
+                plan.Add(IssueSeverity.Error, nameError);
+            string folderError = FolderError(output.folder);
+            if (folderError != null)
+                plan.Add(IssueSeverity.Error, folderError);
 
-            string folder = (output.folder ?? string.Empty).Replace('\\', '/').TrimEnd('/');
-            if (folder != "Assets" && !folder.StartsWith("Assets/"))
-                plan.Add(IssueSeverity.Error, "Output folder must be inside Assets.");
-
-            if (output.importMode == ImportMode.CopyFromInput &&
-                (output.importSourceInput < 0 || output.importSourceInput >= slotCount || inputs[output.importSourceInput] == null))
-                plan.Add(IssueSeverity.Warning, $"Import settings source {PackEngine.SlotName(output.importSourceInput)} is empty: tool settings are used instead.");
+            if (output.importMode == ImportMode.CopyFromInput)
+            {
+                int source = output.importSourceInput;
+                bool filled = source >= 0 && source < slotCount &&
+                              (slotHasTexture != null ? source < slotHasTexture.Count && slotHasTexture[source] : inputs[source] != null);
+                if (!filled)
+                    plan.Add(IssueSeverity.Warning, $"Import settings source {PackEngine.SlotName(source)} is empty: tool settings are used instead.");
+            }
 
             return plan;
+        }
+
+        /// <summary>Why a file name (without extension) cannot be used, or null when it is fine.</summary>
+        public static string FileNameError(string fileName)
+        {
+            if (string.IsNullOrWhiteSpace(fileName))
+                return "Output file name is empty.";
+            if (fileName.IndexOfAny(s_InvalidNameChars) >= 0 || fileName.Trim() != fileName || fileName.EndsWith("."))
+                return "Output file name contains invalid characters, or starts or ends with a space or a dot.";
+            if (IsIgnoredByUnity(new OutputSettings { fileName = fileName }.CleanFileName))
+                return "Unity ignores files whose name starts with '.' or ends with '~': pick another name.";
+            return null;
+        }
+
+        /// <summary>Why an output folder cannot be used, or null when it is fine. Empty means Assets.</summary>
+        public static string FolderError(string folder)
+        {
+            folder = OutputSettings.NormalizeFolder(folder);
+            if (folder != "Assets" && !folder.StartsWith("Assets/"))
+                return "Output folder must be inside Assets.";
+            if (("/" + folder + "/").Contains("/../") || ("/" + folder + "/").Contains("/./"))
+                return "Output folder cannot contain '.' or '..' segments.";
+            if (folder.IndexOfAny(s_InvalidFolderChars) >= 0)
+                return "Output folder contains invalid characters.";
+            foreach (string segment in folder.Split('/'))
+            {
+                if (segment.Length == 0 || IsIgnoredByUnity(segment) || segment.Trim() != segment)
+                    return $"Output folder segment '{segment}' is empty, has extra spaces, or is ignored by Unity (starts with '.' or ends with '~').";
+            }
+            return null;
+        }
+
+        /// <summary>Unity does not import hidden names: starting with a dot or ending with a tilde.</summary>
+        static bool IsIgnoredByUnity(string name)
+        {
+            return name.StartsWith(".") || name.EndsWith("~");
         }
 
         static string Format255(float value)

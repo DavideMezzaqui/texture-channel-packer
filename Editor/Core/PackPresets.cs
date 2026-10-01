@@ -23,7 +23,7 @@ namespace DAVFX.TextureChannelPacker
         /// <summary>RGBA when the first input has alpha, RGB otherwise.</summary>
         public bool FollowInputAlpha;
 
-        /// <summary>Menu path, e.g. "Unity/HDRP - URP Mask Map".</summary>
+        /// <summary>Menu path, e.g. "Unity/HDRP Mask Map".</summary>
         public string MenuPath => string.IsNullOrEmpty(Category) ? Name : Category + "/" + Name;
     }
 
@@ -39,6 +39,7 @@ namespace DAVFX.TextureChannelPacker
         static readonly string[] s_Albedo = { "albedo", "basecolor", "base", "color", "colour", "diffuse", "diff", "col", "bc", "d" };
         static readonly string[] s_Normal = { "normal", "normals", "nrm", "norm", "nml", "nor", "n" };
         static readonly string[] s_Opacity = { "opacity", "alpha", "transparency", "opac", "op", "mask" };
+        static readonly string[] s_Height = { "height", "heightmap", "displacement", "disp", "bump", "h" };
 
         static List<PackPreset> s_All;
         static HashSet<string> s_Keywords;
@@ -52,7 +53,7 @@ namespace DAVFX.TextureChannelPacker
                 if (s_Keywords == null)
                 {
                     s_Keywords = new HashSet<string>(s_Metallic.Concat(s_Occlusion).Concat(s_Detail).Concat(s_Smoothness)
-                        .Concat(s_Roughness).Concat(s_Albedo).Concat(s_Normal).Concat(s_Opacity)
+                        .Concat(s_Roughness).Concat(s_Albedo).Concat(s_Normal).Concat(s_Opacity).Concat(s_Height)
                         .Concat(new[] { "orm", "maskmap", "packed", "height", "emission", "emissive" }));
                 }
                 return s_Keywords;
@@ -108,9 +109,9 @@ namespace DAVFX.TextureChannelPacker
             // Unity
             list.Add(new PackPreset
             {
-                Name = "HDRP - URP Mask Map",
+                Name = "HDRP Mask Map",
                 Category = "Unity",
-                Description = "R Metallic, G Ambient Occlusion, B Detail Mask, A Smoothness. Empty inputs use Unity's defaults.",
+                Description = "HDRP Lit: R Metallic, G Ambient Occlusion, B Detail Mask, A Smoothness. Empty inputs use HDRP's defaults.",
                 Suffix = "_MaskMap",
                 SlotLabels = new[] { "Metallic", "Occlusion", "Detail Mask", "Smoothness" },
                 SlotKeywords = new[] { s_Metallic, s_Occlusion, s_Detail, s_Smoothness },
@@ -120,15 +121,39 @@ namespace DAVFX.TextureChannelPacker
             });
             list.Add(new PackPreset
             {
-                Name = "HDRP - URP Mask Map (from Roughness)",
+                Name = "HDRP Mask Map (from Roughness)",
                 Category = "Unity",
-                Description = "Same as Mask Map, smoothness is computed as 1 - roughness.",
+                Description = "Same as HDRP Mask Map, smoothness is computed as 1 - roughness.",
                 Suffix = "_MaskMap",
                 SlotLabels = new[] { "Metallic", "Occlusion", "Detail Mask", "Roughness" },
                 SlotKeywords = new[] { s_Metallic, s_Occlusion, s_Detail, s_Roughness },
                 Recipe = Recipe(OutputLayout.RGBA,
                     Ch(T(0, ChannelSource.Red, 0f)), Ch(T(1, ChannelSource.Red, 1f)),
                     Ch(T(2, ChannelSource.Red, 1f)), Ch(T(3, ChannelSource.Red, 0.5f), true))
+            });
+            list.Add(new PackPreset
+            {
+                Name = "Terrain Layer Mask Map",
+                Category = "Unity",
+                Description = "Terrain Layers in URP and HDRP: R Metallic, G Ambient Occlusion, B Height, A Smoothness. Empty inputs use the terrain defaults.",
+                Suffix = "_MaskMap",
+                SlotLabels = new[] { "Metallic", "Occlusion", "Height", "Smoothness" },
+                SlotKeywords = new[] { s_Metallic, s_Occlusion, s_Height, s_Smoothness },
+                Recipe = Recipe(OutputLayout.RGBA,
+                    Ch(T(0, ChannelSource.Red, 0f)), Ch(T(1, ChannelSource.Red, 1f)),
+                    Ch(T(2, ChannelSource.Red, 0.5f)), Ch(T(3, ChannelSource.Red, 0.5f)))
+            });
+            list.Add(new PackPreset
+            {
+                Name = "Terrain Layer Mask Map (from Roughness)",
+                Category = "Unity",
+                Description = "Same as Terrain Layer Mask Map, smoothness is computed as 1 - roughness.",
+                Suffix = "_MaskMap",
+                SlotLabels = new[] { "Metallic", "Occlusion", "Height", "Roughness" },
+                SlotKeywords = new[] { s_Metallic, s_Occlusion, s_Height, s_Roughness },
+                Recipe = Recipe(OutputLayout.RGBA,
+                    Ch(T(0, ChannelSource.Red, 0f)), Ch(T(1, ChannelSource.Red, 1f)),
+                    Ch(T(2, ChannelSource.Red, 0.5f)), Ch(T(3, ChannelSource.Red, 0.5f), true))
             });
             list.Add(new PackPreset
             {
@@ -200,15 +225,16 @@ namespace DAVFX.TextureChannelPacker
             {
                 Name = "Flip Green (DirectX - OpenGL)",
                 Category = "Normal Map",
-                Description = "Inverts the green channel. Unity uses OpenGL style (Y+) normal maps.",
+                Description = "Inverts the green channel. Unity uses OpenGL style (Y+) normal maps. Alpha (often height) is kept.",
                 Suffix = "_FlipG",
                 SlotLabels = new[] { "Normal Map" },
                 SlotKeywords = new[] { s_Normal },
                 ImportMode = ImportMode.CopyFromInput,
                 TextureType = OutputTextureType.NormalMap,
-                Recipe = Recipe(OutputLayout.RGB,
+                FollowInputAlpha = true,
+                Recipe = Recipe(OutputLayout.RGBA,
                     Ch(T(0, ChannelSource.Red, 0.5f)), Ch(T(0, ChannelSource.Green, 0.5f), true),
-                    Ch(T(0, ChannelSource.Blue, 1f)))
+                    Ch(T(0, ChannelSource.Blue, 1f)), Ch(T(0, ChannelSource.Alpha, 1f)))
             });
 
             // Channels

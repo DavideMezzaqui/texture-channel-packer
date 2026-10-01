@@ -11,7 +11,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Lossless reading of the original source files: native PNG (1 to 16 bit, palette, interlaced) and TGA decoders, JPEG via Unity, every other format through a verified, temporary uncompressed import.
 - Lossless writers: PNG 8/16-bit, TGA 8-bit (raw or RLE), EXR half/float (ZIP).
 - Validation that explains every step that could change data (resizing, lower bit depth, HDR clamping, lossy sources).
-- Presets: HDRP/URP Mask Map (also from roughness), URP Metallic + Smoothness, HDRP Detail Map, Albedo + Alpha, Albedo + Smoothness, ORM, normal map green flip, grayscale mask packing, channel swap, remove alpha, extract channel, invert, roughness/smoothness, solid color and flat normal.
+- Presets: HDRP Mask Map and Terrain Layer Mask Map (both also from roughness), URP Metallic + Smoothness, HDRP Detail Map, Albedo + Alpha, Albedo + Smoothness, ORM, normal map green flip, grayscale mask packing, channel swap, remove alpha, extract channel, invert, roughness/smoothness, solid color and flat normal. Channel layouts verified against the HDRP and URP shader sources.
 - Automatic slot assignment and output naming from texture names.
 - In-place overwrite that keeps GUID and import settings, with automatic backups.
 - Project window actions: Open in Channel Packer, Split Channels, Flip Normal Green, Remove Alpha, Invert RGB.
@@ -19,3 +19,4 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - EditMode tests and an external .NET harness that checks the codecs against pypng, Pillow and OpenEXR.
 - Compatibility with Unity 2021.3, 2022.3 and Unity 6, verified by compiling against the real editor assemblies of 2021.3.45f2, 2022.3.62f3, 6000.0.84f1 and 6000.6.4f1 (`compile_matrix.sh`).
 - On Unity 2022.1+ the temporary lossless import also forces the identity channel swizzle and disables green flipping, so project presets cannot alter the data.
+- Fuzz tests (corrupted and truncated files) and a differential test of the engine against a naive implementation on thousands of random recipes.

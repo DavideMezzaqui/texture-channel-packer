@@ -17,6 +17,12 @@ namespace DAVFX.TextureChannelPacker
     {
         internal const string TempFolder = "Assets/__DAVFX_ChannelPacker_Temp";
 
+        /// <summary>Formats Unity's TextureImporter reads. Anything else (DDS, PSB, KTX...) is read from the texture object.</summary>
+        static readonly HashSet<string> s_FileExtensions = new HashSet<string>
+        {
+            ".png", ".jpg", ".jpeg", ".tga", ".bmp", ".exr", ".gif", ".hdr", ".iff", ".pict", ".pct", ".pic", ".psd", ".tif", ".tiff"
+        };
+
         // Meta files produced by a previous successful temp import, reused so the next temp import happens only once.
         static readonly Dictionary<string, string> s_MetaTemplates = new Dictionary<string, string>();
         static readonly Regex s_GuidLine = new Regex(@"^guid: [0-9a-fA-F]{32}", RegexOptions.Multiline);
@@ -42,29 +48,60 @@ namespace DAVFX.TextureChannelPacker
             if (texture == null)
                 throw new ArgumentNullException(nameof(texture));
             string path = AssetDatabase.GetAssetPath(texture);
-            if (string.IsNullOrEmpty(path) || !AssetDatabase.IsMainAsset(texture) || path.EndsWith(".asset", StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrEmpty(path) || !AssetDatabase.IsMainAsset(texture) || !IsImageFile(path))
                 return ReadTextureObject(texture);
             return LoadFile(path);
+        }
+
+        internal static bool IsImageFile(string assetPath)
+        {
+            return s_FileExtensions.Contains(Path.GetExtension(assetPath).ToLowerInvariant());
         }
 
         /// <summary>Loads an image file from its asset path ("Assets/..." or "Packages/...").</summary>
         public static PixelImage LoadFile(string assetPath)
         {
+            if (!IsImageFile(assetPath))
+            {
+                var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath);
+                if (texture == null)
+                    throw new PackException($"{assetPath} is not a texture the tool can read.");
+                return ReadTextureObject(texture);
+            }
+
             string full = AssetPaths.ToFullPath(assetPath);
             if (full == null || !File.Exists(full))
                 throw new PackException($"File not found: {assetPath}");
 
             byte[] bytes = File.ReadAllBytes(full);
             string ext = Path.GetExtension(assetPath).ToLowerInvariant();
+            bool jpeg = ext == ".jpg" || ext == ".jpeg";
 
-            var native = ImageEncoder.TryDecode(bytes, ext);
-            if (native != null)
-                return native;
+            // Built-in decoders first (exact and fast). A variant they do not support falls back to Unity's importer.
+            PackException nativeError = null;
+            try
+            {
+                var native = ImageEncoder.TryDecode(bytes, ext);
+                if (native != null)
+                    return native;
+                if (jpeg)
+                    return LoadJpeg(bytes);
+            }
+            catch (PackException e)
+            {
+                nativeError = e;
+            }
 
-            if (ext == ".jpg" || ext == ".jpeg")
-                return LoadJpeg(bytes);
-
-            return LoadThroughImporter(full, bytes, ext);
+            try
+            {
+                var image = LoadThroughImporter(full, bytes, ext);
+                image.IsLossySource |= jpeg;
+                return image;
+            }
+            catch (PackException) when (nativeError != null)
+            {
+                throw nativeError;
+            }
         }
 
         // ------------------------------------------------------------------ JPEG
@@ -285,8 +322,14 @@ namespace DAVFX.TextureChannelPacker
                 return SamplePrecision.Half;
             if (GraphicsFormatUtility.IsIEEE754Format(format))
                 return SamplePrecision.Float;
-            return GraphicsFormatUtility.GetComponentCount(format) > 0 &&
-                   GraphicsFormatUtility.GetBlockSize(format) / Math.Max(1u, GraphicsFormatUtility.GetComponentCount(format)) >= 2
+            // Packed and compressed HDR formats (BC6H, ASTC HDR, RGB9E5, B10G11R11) have "Float" in their name:
+            // treat them as HDR so outputs default to EXR instead of clamping.
+            if (format.ToString().IndexOf("Float", StringComparison.Ordinal) >= 0)
+                return SamplePrecision.Half;
+            if (GraphicsFormatUtility.IsCompressedFormat(format))
+                return SamplePrecision.UNorm8;
+            uint components = GraphicsFormatUtility.GetComponentCount(format);
+            return components > 0 && GraphicsFormatUtility.GetBlockSize(format) / components >= 2
                 ? SamplePrecision.UNorm16
                 : SamplePrecision.UNorm8;
         }
@@ -305,7 +348,24 @@ namespace DAVFX.TextureChannelPacker
             var format = texture.format;
             bool eightBit = format == TextureFormat.RGBA32 || format == TextureFormat.ARGB32 ||
                             format == TextureFormat.RGB24 || format == TextureFormat.BGRA32;
-            if (eightBit)
+            if (format == TextureFormat.RGBAFloat)
+            {
+                // Reads the texture memory directly: no temporary Color[] (16 bytes per pixel) for large HDR images.
+                var data = texture.GetPixelData<float>(0);
+                for (int y = 0; y < h; y++)
+                {
+                    int src = (h - 1 - y) * w * 4;
+                    int dst = y * w;
+                    for (int x = 0; x < w; x++, src += 4)
+                    {
+                        r[dst + x] = data[src];
+                        g[dst + x] = data[src + 1];
+                        b[dst + x] = data[src + 2];
+                        a[dst + x] = data[src + 3];
+                    }
+                }
+            }
+            else if (eightBit)
             {
                 Color32[] pixels = texture.GetPixels32();
                 var lut = Lut8;

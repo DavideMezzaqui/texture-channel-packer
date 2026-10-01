@@ -67,20 +67,20 @@ namespace DAVFX.TextureChannelPacker
         /// <summary>Decodes the inputs the recipe reads and checks the request without writing anything.</summary>
         public static PackPlan Plan(PackRequest request, out PixelImage[] images)
         {
+            CheckRequest(request);
             images = LoadUsedInputs(request, false);
             var infos = images.Select(InputInfo.From).ToArray();
-            return PackValidator.Validate(request.Recipe, infos, request.Size, request.Output);
+            return PackValidator.Validate(request.Recipe, infos, request.Size, request.Output, SlotPresence(request));
         }
 
         public static PackResult Pack(PackRequest request, bool showProgress = true)
         {
-            if (request == null)
-                throw new ArgumentNullException(nameof(request));
+            CheckRequest(request);
             try
             {
                 var images = LoadUsedInputs(request, showProgress);
                 var infos = images.Select(InputInfo.From).ToArray();
-                var plan = PackValidator.Validate(request.Recipe, infos, request.Size, request.Output);
+                var plan = PackValidator.Validate(request.Recipe, infos, request.Size, request.Output, SlotPresence(request));
                 if (plan.HasErrors)
                     throw new PackException(string.Join("\n", plan.Issues.Where(i => i.Severity == IssueSeverity.Error).Select(i => i.Message)));
 
@@ -127,15 +127,20 @@ namespace DAVFX.TextureChannelPacker
         {
             if (source == null)
                 throw new ArgumentNullException(nameof(source));
+            if (settings == null)
+                settings = new SplitSettings();
             settings.Sanitize();
             var written = new List<string>();
             try
             {
                 if (showProgress)
                     EditorUtility.DisplayProgressBar(ProgressTitle, "Reading " + source.name, 0.1f);
-                var image = DecodeCache.Get(source);
+                string error = SplitError(source, settings);
+                if (error != null)
+                    throw new PackException(error);
                 string sourcePath = AssetDatabase.GetAssetPath(source);
-                string folder = string.IsNullOrEmpty(settings.folder) ? AssetPaths.WritableFolderOf(sourcePath) : settings.folder;
+                string folder = string.IsNullOrWhiteSpace(settings.folder) ? AssetPaths.WritableFolderOf(sourcePath) : settings.folder;
+                var image = DecodeCache.Get(source);
                 var format = settings.autoFormat ? AutoFormat(sourcePath, image.Precision) : settings.format;
                 var depth = OutputSettings.ResolveDepth(format, settings.bitDepth, image.Precision);
 
@@ -174,6 +179,37 @@ namespace DAVFX.TextureChannelPacker
             return written;
         }
 
+        /// <summary>Why a split cannot run with these settings (folder, suffixes), or null when it can.</summary>
+        public static string SplitError(Texture2D source, SplitSettings settings)
+        {
+            if (source == null)
+                return "Pick a source texture.";
+            settings.Sanitize();
+            string folder = string.IsNullOrWhiteSpace(settings.folder)
+                ? AssetPaths.WritableFolderOf(AssetDatabase.GetAssetPath(source))
+                : settings.folder;
+            string folderError = PackValidator.FolderError(folder);
+            if (folderError != null)
+                return folderError;
+
+            var usedSuffixes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (int c = 0; c < 4; c++)
+            {
+                if (!settings.channels[c])
+                    continue;
+                string suffix = settings.suffixes[c] ?? string.Empty;
+                // An empty suffix would give the source's own name and overwrite it.
+                if (suffix.Trim().Length == 0)
+                    return $"Channel {"RGBA"[c]}: the suffix is empty, the file would replace the source texture.";
+                if (!usedSuffixes.Add(suffix))
+                    return $"Channel {"RGBA"[c]}: the suffix '{suffix}' is used twice, one file would replace the other.";
+                string nameError = PackValidator.FileNameError(source.name + suffix);
+                if (nameError != null)
+                    return $"Channel {"RGBA"[c]}: {nameError}";
+            }
+            return null;
+        }
+
         /// <summary>Lossless format for derived files: EXR for float data, TGA for TGA sources, PNG otherwise.</summary>
         public static OutputFormat AutoFormat(string sourcePath, SamplePrecision precision)
         {
@@ -199,6 +235,21 @@ namespace DAVFX.TextureChannelPacker
                 images[i] = DecodeCache.Get(texture);
             }
             return images;
+        }
+
+        static void CheckRequest(PackRequest request)
+        {
+            if (request == null)
+                throw new ArgumentNullException(nameof(request));
+            if (request.Recipe == null || request.Size == null || request.Output == null)
+                throw new ArgumentException("PackRequest needs a Recipe, Size and Output.", nameof(request));
+            if (request.Inputs == null)
+                request.Inputs = new List<Texture2D>();
+        }
+
+        static bool[] SlotPresence(PackRequest request)
+        {
+            return request.Inputs.Select(t => t != null).ToArray();
         }
 
         public static bool[] UsedSlots(PackRecipe recipe, int slotCount)

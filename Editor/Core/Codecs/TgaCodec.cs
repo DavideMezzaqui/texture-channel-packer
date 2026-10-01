@@ -18,6 +18,22 @@ namespace DAVFX.TextureChannelPacker.Codecs
         {
             if (data == null || data.Length < 18)
                 throw new PackException("TGA file is truncated.");
+            try
+            {
+                return DecodeChecked(data);
+            }
+            catch (AggregateException e) when (e.InnerException is PackException inner)
+            {
+                throw new PackException(inner.Message, inner);
+            }
+            catch (Exception e) when (!(e is PackException) && !(e is OutOfMemoryException))
+            {
+                throw new PackException($"The TGA file is damaged ({e.GetType().Name}).", e);
+            }
+        }
+
+        static PixelImage DecodeChecked(byte[] data)
+        {
 
             int idLength = data[0];
             int colorMapType = data[1];
@@ -36,6 +52,7 @@ namespace DAVFX.TextureChannelPacker.Codecs
                 throw new PackException($"Unsupported TGA image type {imageType}.");
             if (width <= 0 || height <= 0)
                 throw new PackException($"Invalid TGA size {width}x{height}.");
+            PngCodec.CheckSize("TGA", width, height);
 
             int alphaBits = descriptor & 0x0F;
             bool rightToLeft = (descriptor & 0x10) != 0;
@@ -69,9 +86,16 @@ namespace DAVFX.TextureChannelPacker.Codecs
                 throw new PackException("Color-mapped TGA without a color map.");
             }
 
+            bool depthValid;
+            switch (baseType)
+            {
+                case 1: depthValid = depth == 8 || depth == 16; break;
+                case 2: depthValid = depth == 15 || depth == 16 || depth == 24 || depth == 32; break;
+                default: depthValid = depth == 8 || depth == 16; break;
+            }
+            if (!depthValid)
+                throw new PackException($"Unsupported TGA pixel depth {depth} for image type {imageType}.");
             int pixelBytes = (depth + 7) / 8;
-            if (pixelBytes < 1 || pixelBytes > 4)
-                throw new PackException($"Unsupported TGA pixel depth {depth}.");
 
             int count = width * height;
             byte[] pixels = new byte[count * pixelBytes];

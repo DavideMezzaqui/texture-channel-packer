@@ -45,6 +45,9 @@ namespace DAVFX.TextureChannelPacker
         public Texture2D splitSource;
         public SplitSettings split = new SplitSettings();
 
+        /// <summary>Set when the layout must follow the alpha of input A as soon as it is decoded (presets like Swap or Invert).</summary>
+        [NonSerialized] public bool layoutFollowsInputPending;
+
         [SerializeField] bool m_Initialized;
 
         public void EnsureInitialized()
@@ -90,6 +93,7 @@ namespace DAVFX.TextureChannelPacker
             presetName = preset.Name;
             presetSuffix = preset.Suffix ?? string.Empty;
             followInputAlpha = preset.FollowInputAlpha;
+            layoutFollowsInputPending = preset.FollowInputAlpha;
             recipe = preset.Recipe.Clone();
 
             int slots = Mathf.Clamp(preset.SlotLabels.Length, 1, MaxInputs);
@@ -125,47 +129,40 @@ namespace DAVFX.TextureChannelPacker
 
         public PackPreset CurrentPreset => PackPresets.Find(presetName);
 
-        /// <summary>Puts textures into slots: by name keywords when the preset has them, otherwise in order.</summary>
+        /// <summary>
+        /// Puts textures into slots: by name when the preset knows the maps, otherwise in order.
+        /// <paramref name="replaceAll"/> clears every slot first (Use Selection, Open in Channel Packer);
+        /// otherwise only empty slots are filled (drag and drop).
+        /// </summary>
         public void AssignTextures(IList<Texture2D> textures, bool replaceAll)
         {
             if (textures == null || textures.Count == 0)
                 return;
             Sanitize();
-            var preset = CurrentPreset;
-            var remaining = textures.Where(t => t != null).Distinct().ToList();
-
-            if (preset != null && preset.SlotKeywords.Length > 0)
+            var candidates = textures.Where(t => t != null).Distinct().ToList();
+            if (replaceAll)
             {
-                var names = remaining.Select(t => t.name).ToList();
-                var taken = new HashSet<int>();
-                for (int slot = 0; slot < preset.SlotKeywords.Length && slot < inputs.Count; slot++)
-                {
-                    if (!replaceAll && inputs[slot].texture != null)
-                        continue;
-                    int match = NamingUtility.FindBestMatch(names, preset.SlotKeywords[slot], taken);
-                    if (match >= 0)
-                    {
-                        inputs[slot].texture = remaining[match];
-                        taken.Add(match);
-                    }
-                }
-                remaining = remaining.Where((t, i) => !taken.Contains(i)).ToList();
+                foreach (var slot in inputs)
+                    slot.texture = null;
+            }
+            else
+            {
+                candidates = candidates.Where(t => !inputs.Any(s => s.texture == t)).ToList();
             }
 
-            // Whatever did not match by name goes into empty slots in order.
-            foreach (var texture in remaining)
+            if (candidates.Count > 0)
             {
-                if (inputs.Any(s => s.texture == texture))
-                    continue;
-                var empty = inputs.FirstOrDefault(s => s.texture == null);
-                if (empty == null)
+                var preset = CurrentPreset;
+                var keywords = preset != null ? preset.SlotKeywords : Array.Empty<string[]>();
+                var occupied = inputs.Select(s => s.texture != null).ToArray();
+                var assignment = NamingUtility.AssignSlots(candidates.Select(t => t.name).ToList(), keywords, occupied, MaxInputs);
+                for (int i = 0; i < assignment.Length; i++)
                 {
-                    if (inputs.Count >= MaxInputs)
-                        break;
-                    empty = new InputSlot();
-                    inputs.Add(empty);
+                    if (i >= inputs.Count)
+                        inputs.Add(new InputSlot());
+                    if (assignment[i] >= 0)
+                        inputs[i].texture = candidates[assignment[i]];
                 }
-                empty.texture = texture;
             }
             UpdateAutoName();
         }

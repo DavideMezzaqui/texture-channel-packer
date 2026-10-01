@@ -33,7 +33,8 @@ namespace DAVFX.TextureChannelPacker
                 throw new PackException($"Cannot create folder '{assetFolder}'.");
             string parent = assetFolder.Substring(0, slash);
             EnsureFolder(parent);
-            AssetDatabase.CreateFolder(parent, assetFolder.Substring(slash + 1));
+            if (string.IsNullOrEmpty(AssetDatabase.CreateFolder(parent, assetFolder.Substring(slash + 1))))
+                throw new PackException($"Cannot create folder '{assetFolder}'.");
         }
 
         public static string FolderOf(string assetPath)

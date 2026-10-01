@@ -184,7 +184,7 @@ namespace DAVFX.TextureChannelPacker.Tests
 
             var state = new PackerState();
             state.EnsureInitialized();
-            state.ApplyPreset(PackPresets.Find("HDRP - URP Mask Map"));
+            state.ApplyPreset(PackPresets.Find("HDRP Mask Map"));
             state.AssignTextures(textures.ToArray(), true);
             Assert.AreEqual("T_Rock_MaskMap", state.output.fileName, "automatic name");
             Assert.AreEqual(Folder, state.output.folder, "automatic folder");
@@ -212,9 +212,11 @@ namespace DAVFX.TextureChannelPacker.Tests
             string path = AssetDatabase.GetAssetPath(texture);
             string guid = AssetDatabase.AssetPathToGUID(path);
 
+            var recipe = PackPresets.Find("Flip Green (DirectX - OpenGL)").Recipe.Clone();
+            recipe.layout = OutputLayout.RGB; // the source has no alpha (the window and the menu action do this automatically)
             var request = new PackRequest
             {
-                Recipe = PackPresets.Find("Flip Green (DirectX - OpenGL)").Recipe.Clone(),
+                Recipe = recipe,
                 Inputs = new List<Texture2D> { texture },
                 Output = new OutputSettings { folder = Folder, fileName = "T_Wall_N", format = OutputFormat.PNG, backupOnOverwrite = true }
             };
@@ -229,9 +231,60 @@ namespace DAVFX.TextureChannelPacker.Tests
                 Assert.AreEqual(255 - ColorMath.Quantize(normal.G[i], 255), ColorMath.Quantize(flipped.G[i], 255));
 
             request.Inputs[0] = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
-            ChannelPacker.Pack(request, false);
+            var second = ChannelPacker.Pack(request, false);
             TestImages.AssertImageExact(normal, ReadOutput(path), 255);
-            File.Delete(first.BackupPath);
+
+            // Two overwrites in a row keep two distinct backups: the original is never lost.
+            Assert.AreNotEqual(first.BackupPath, second.BackupPath);
+            TestImages.AssertImageExact(normal, PngCodec.Decode(File.ReadAllBytes(first.BackupPath)), 255);
+            Directory.Delete(Path.GetDirectoryName(first.BackupPath), true);
+            Directory.Delete(Path.GetDirectoryName(second.BackupPath), true);
+        }
+
+        [Test]
+        public void TextureAsset_ReadableUncompressed_IsReadExactly()
+        {
+            var source = TestImages.Noise(16, 12, 8, false, true, 41);
+            var texture = new Texture2D(16, 12, TextureFormat.RGBA32, false, true);
+            var pixels = new Color32[16 * 12];
+            for (int y = 0; y < 12; y++)
+            {
+                for (int x = 0; x < 16; x++)
+                {
+                    int i = y * 16 + x;
+                    pixels[(11 - y) * 16 + x] = new Color32(
+                        (byte)ColorMath.Quantize(source.R[i], 255), (byte)ColorMath.Quantize(source.G[i], 255),
+                        (byte)ColorMath.Quantize(source.B[i], 255), (byte)ColorMath.Quantize(source.A[i], 255));
+                }
+            }
+            texture.SetPixels32(pixels);
+            texture.Apply();
+            AssetDatabase.CreateAsset(texture, PathOf("generated.asset"));
+
+            var loaded = TextureSourceLoader.Load(AssetDatabase.LoadAssetAtPath<Texture2D>(PathOf("generated.asset")));
+            TestImages.AssertImageExact(source, loaded, 255);
+            Assert.IsFalse(loaded.IsLossySource);
+        }
+
+        [Test]
+        public void UseSelection_WholeMaterialSet_FillsOnlyMatchingSlots()
+        {
+            var textures = new List<Texture2D>();
+            foreach (string name in new[] { "T_Wall_BaseColor.png", "T_Wall_Normal.png", "T_Wall_Roughness.png", "T_Wall_AO.png", "T_Wall_Metallic.png" })
+                textures.Add(WriteAndImport(name, PngCodec.Encode(TestImages.GrayNoise(8, 8, name.Length), OutputLayout.Grayscale, 8)));
+
+            var state = new PackerState();
+            state.EnsureInitialized();
+            state.ApplyPreset(PackPresets.Find("HDRP Mask Map (from Roughness)"));
+            state.inputs[2].texture = textures[0]; // a leftover from a previous set must be cleared
+            state.AssignTextures(textures, true);
+
+            Assert.AreEqual(textures[4], state.inputs[0].texture, "Metallic");
+            Assert.AreEqual(textures[3], state.inputs[1].texture, "Occlusion");
+            Assert.IsNull(state.inputs[2].texture, "Detail Mask stays empty: albedo and normal are not detail masks");
+            Assert.AreEqual(textures[2], state.inputs[3].texture, "Roughness");
+            Assert.AreEqual(4, state.inputs.Count, "no extra slots for unrelated maps");
+            Assert.AreEqual("T_Wall_MaskMap", state.output.fileName);
         }
 
         [Test]
@@ -251,6 +304,28 @@ namespace DAVFX.TextureChannelPacker.Tests
                 request.Inputs.Add(AssetDatabase.LoadAssetAtPath<Texture2D>(part));
             var result = ChannelPacker.Pack(request, false);
             TestImages.AssertImageExact(source, ReadOutput(result.AssetPath), 255);
+        }
+
+        [Test]
+        public void Split_EmptyOrDuplicateSuffix_IsRefused_AndTheSourceIsUntouched()
+        {
+            var source = TestImages.Noise(8, 8, 8, false, false, 33);
+            byte[] original = PngCodec.Encode(source, OutputLayout.RGB, 8);
+            var texture = WriteAndImport("T_Split.png", original);
+
+            var empty = new SplitSettings();
+            empty.suffixes[0] = "";
+            Assert.Throws<PackException>(() => ChannelPacker.Split(texture, empty, false));
+
+            var duplicate = new SplitSettings();
+            duplicate.suffixes[1] = "_R";
+            Assert.Throws<PackException>(() => ChannelPacker.Split(texture, duplicate, false));
+
+            var hidden = new SplitSettings { folder = Folder + "/Hidden~" };
+            Assert.Throws<PackException>(() => ChannelPacker.Split(texture, hidden, false));
+
+            CollectionAssert.AreEqual(original, File.ReadAllBytes(Path.GetFullPath(PathOf("T_Split.png"))), "source file untouched");
+            Assert.IsFalse(File.Exists(Path.GetFullPath(PathOf("T_Split_G.png"))), "nothing written");
         }
 
         [Test]

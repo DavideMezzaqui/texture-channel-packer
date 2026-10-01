@@ -71,13 +71,31 @@ namespace DAVFX.TextureChannelPacker
 
         public string Extension => ExtensionFor(format);
 
-        public string AssetPath
+        /// <summary>Folder with forward slashes and no trailing slash; empty means Assets.</summary>
+        public string NormalizedFolder => NormalizeFolder(folder);
+
+        /// <summary>File name without an output extension typed by mistake ("T_Rock.png" gives "T_Rock").</summary>
+        public string CleanFileName
         {
             get
             {
-                string dir = string.IsNullOrEmpty(folder) ? "Assets" : folder.Replace('\\', '/').TrimEnd('/');
-                return dir + "/" + fileName + Extension;
+                string name = fileName ?? string.Empty;
+                foreach (OutputFormat f in Enum.GetValues(typeof(OutputFormat)))
+                {
+                    string ext = ExtensionFor(f);
+                    if (name.Length > ext.Length && name.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
+                        return name.Substring(0, name.Length - ext.Length);
+                }
+                return name;
             }
+        }
+
+        public string AssetPath => NormalizedFolder + "/" + CleanFileName + Extension;
+
+        public static string NormalizeFolder(string value)
+        {
+            string dir = (value ?? string.Empty).Trim().Replace('\\', '/').TrimEnd('/');
+            return dir.Length == 0 ? "Assets" : dir;
         }
 
         public static string ExtensionFor(OutputFormat format)
@@ -101,7 +119,8 @@ namespace DAVFX.TextureChannelPacker
             switch (format)
             {
                 case OutputFormat.PNG: return new[] { OutputBitDepth.Auto, OutputBitDepth.Bits8, OutputBitDepth.Bits16 };
-                case OutputFormat.TGA: return new[] { OutputBitDepth.Bits8 };
+                // TGA is always 8-bit. Auto (not Bits8) is stored so switching back to PNG keeps Auto.
+                case OutputFormat.TGA: return new[] { OutputBitDepth.Auto };
                 default: return new[] { OutputBitDepth.Auto, OutputBitDepth.Half, OutputBitDepth.Float };
             }
         }

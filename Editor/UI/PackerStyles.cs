@@ -10,23 +10,18 @@ namespace DAVFX.TextureChannelPacker
         public static readonly Color Blue = new Color(0.36f, 0.55f, 0.93f);
         public static readonly Color Alpha = new Color(0.62f, 0.62f, 0.62f);
         public static readonly Color Gray = new Color(0.78f, 0.78f, 0.78f);
-        public static readonly Color Slot = new Color(0.32f, 0.32f, 0.32f);
 
         static GUIStyle s_Section;
         static GUIStyle s_Chip;
         static GUIStyle s_Info;
         static GUIStyle s_Card;
-        static GUIStyle s_Title;
         static GUIStyle s_BigButton;
         static GUIStyle s_SlotLabel;
-        static GUIStyle s_Wrap;
+        static GUIStyle s_CenteredInfo;
 
         public static Color Separator => EditorGUIUtility.isProSkin ? new Color(1f, 1f, 1f, 0.08f) : new Color(0f, 0f, 0f, 0.12f);
-        public static Color ChipText => Color.white;
 
         public static GUIStyle Section => s_Section ?? (s_Section = new GUIStyle(EditorStyles.boldLabel) { fontSize = 12, margin = new RectOffset(0, 0, 6, 2) });
-
-        public static GUIStyle Title => s_Title ?? (s_Title = new GUIStyle(EditorStyles.boldLabel) { fontSize = 14 });
 
         public static GUIStyle Chip => s_Chip ?? (s_Chip = new GUIStyle(EditorStyles.boldLabel)
         {
@@ -41,7 +36,7 @@ namespace DAVFX.TextureChannelPacker
             normal = { textColor = EditorGUIUtility.isProSkin ? new Color(0.62f, 0.62f, 0.62f) : new Color(0.38f, 0.38f, 0.38f) }
         });
 
-        public static GUIStyle Wrap => s_Wrap ?? (s_Wrap = new GUIStyle(EditorStyles.label) { wordWrap = true });
+        public static GUIStyle CenteredInfo => s_CenteredInfo ?? (s_CenteredInfo = new GUIStyle(Info) { alignment = TextAnchor.MiddleCenter });
 
         public static GUIStyle SlotLabel => s_SlotLabel ?? (s_SlotLabel = new GUIStyle(EditorStyles.label) { clipping = TextClipping.Clip });
 
@@ -76,15 +71,6 @@ namespace DAVFX.TextureChannelPacker
             GUI.color = Color.white;
             GUI.Label(rect, text, Chip);
             GUI.color = previous;
-        }
-
-        public static void SectionHeader(string text)
-        {
-            GUILayout.Space(4);
-            GUILayout.Label(text, Section);
-            var rect = GUILayoutUtility.GetRect(1, 1, GUILayout.ExpandWidth(true));
-            EditorGUI.DrawRect(rect, Separator);
-            GUILayout.Space(4);
         }
     }
 }

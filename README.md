@@ -28,7 +28,7 @@ Open the tool from **Tools > DAVFX > Texture Channel Packer**, or right click te
 
 ## Quick start
 
-1. Pick a preset in the toolbar (for example **Unity > HDRP - URP Mask Map**).
+1. Pick a preset in the toolbar (for example **Unity > HDRP Mask Map**).
 2. Select your textures in the Project window and click **Use Selection**. They are matched to the slots by name (`_Metallic`, `_AO`, `_Roughness`...). You can also drag them into the slots.
 3. Check the preview and the messages under the settings.
 4. Click **Pack**. The file is saved next to the first input, named after the texture set plus the preset suffix (`T_Rock_MaskMap.png`).
@@ -62,19 +62,22 @@ Operations run in this order: source, combine, color conversion, invert, levels.
 
 | Preset | Output |
 |---|---|
-| HDRP - URP Mask Map | R Metallic, G Occlusion, B Detail Mask, A Smoothness |
-| HDRP - URP Mask Map (from Roughness) | same, A = 1 - Roughness |
-| URP - Built-in Metallic + Smoothness | RGB Metallic, A Smoothness |
+| HDRP Mask Map | HDRP Lit: R Metallic, G Occlusion, B Detail Mask, A Smoothness |
+| HDRP Mask Map (from Roughness) | same, A = 1 - Roughness |
+| Terrain Layer Mask Map (also from Roughness) | URP and HDRP terrain: R Metallic, G Occlusion, B Height, A Smoothness |
+| URP - Built-in Metallic + Smoothness | RGB Metallic, A Smoothness (URP Lit has no mask map: it uses this plus an Occlusion map) |
 | HDRP Detail Map | R desaturated Albedo, G Normal Y, B Smoothness, A Normal X |
 | Albedo + Alpha | RGB Albedo, A Opacity |
 | Albedo + Smoothness | RGB Albedo, A Smoothness |
 | ORM | R Occlusion, G Roughness, B Metallic |
-| Flip Green (DirectX - OpenGL) | G inverted |
+| Flip Green (DirectX - OpenGL) | G inverted, alpha kept when present |
 | 4 / 3 Grayscale Masks | one grayscale texture per channel (VFX masks) |
 | Swap Red - Blue, Remove Alpha, Extract Channel, Invert RGB, Roughness - Smoothness | channel utilities |
 | Solid Color, Flat Normal Map | new textures from constants |
 
-Empty slots in the material presets fall back to Unity's defaults (Metallic 0, Occlusion 1, Detail Mask 1, Smoothness 0.5), and the tool tells you when that happens.
+Empty slots in the material presets fall back to Unity's defaults (Metallic 0, Occlusion 1, Detail Mask 1, Height 0.5, Smoothness 0.5), and the tool tells you when that happens. The channel layouts were checked against the HDRP and URP shader sources.
+
+**Use Selection** matches textures to slots by name. With a whole material set selected (BaseColor, Normal, AO...), only the maps the preset needs are used: the others are left out instead of landing in a slot with a different meaning.
 
 ## How quality is preserved
 
@@ -97,7 +100,7 @@ using DAVFX.TextureChannelPacker;
 
 var request = new PackRequest
 {
-    Recipe = PackPresets.Find("HDRP - URP Mask Map").Recipe.Clone(),
+    Recipe = PackPresets.Find("HDRP Mask Map").Recipe.Clone(),
     Inputs = { metallic, occlusion, null, smoothness },   // null = preset default
     Output = { folder = "Assets/Textures", fileName = "T_Rock_MaskMap" }
 };
@@ -112,7 +115,8 @@ The whole UI is `ChannelPackerView`, an IMGUI view that any editor window can ho
 [SerializeField] PackerState m_State = new PackerState();
 ChannelPackerView m_View;
 
-void OnEnable()  => m_View = new ChannelPackerView(m_State, this, Repaint);
+// The provider (() => m_State) keeps the view valid when Undo replaces the state object.
+void OnEnable()  => m_View = new ChannelPackerView(() => m_State, this, Repaint);
 void OnDisable() => m_View.Dispose();
 void OnGUI()     => m_View.OnGUI();
 ```
@@ -142,6 +146,8 @@ Tests~/UnityCompileCheck/compile_matrix.sh 2021.3 2022.3 6000.0 6000.6
 
 ## Limits
 
-- Sources read through Unity's importer are limited to 16384 pixels per side.
+- Images are limited to 16384 pixels per side, like Unity textures.
+- Textures that are not image files (DDS, PSB, textures inside FBX files or .asset files) are read from the imported texture: exact when it is uncompressed, otherwise the tool tells you the source is already lossy.
+- PNG gamma (gAMA) and color profile chunks are ignored on purpose: the tool works on the stored values, which is what shaders sample when "Ignore PNG Gamma" is on.
 - PSD files are read as Unity reads them: the flattened image.
 - Gray EXR outputs are written as R = G = B so every application imports them the same way.

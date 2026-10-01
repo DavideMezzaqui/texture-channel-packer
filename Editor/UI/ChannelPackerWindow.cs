@@ -33,7 +33,7 @@ namespace DAVFX.TextureChannelPacker
         {
             if (m_State == null)
                 m_State = new PackerState();
-            m_View = new ChannelPackerView(m_State, this, Repaint);
+            m_View = new ChannelPackerView(() => m_State, this, Repaint);
             Undo.undoRedoPerformed += OnUndoRedo;
         }
 
@@ -66,6 +66,8 @@ namespace DAVFX.TextureChannelPacker
 
         void OnUndoRedo()
         {
+            if (m_State == null)
+                m_State = new PackerState();
             m_View?.MarkDirty();
             Repaint();
         }

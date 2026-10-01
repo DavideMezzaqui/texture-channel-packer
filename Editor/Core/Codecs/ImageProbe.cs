@@ -82,6 +82,8 @@ namespace DAVFX.TextureChannelPacker.Codecs
                 string type = ReadCString(d, ref pos);
                 int size = BitConverter.ToInt32(d, pos);
                 pos += 4;
+                if (size < 0 || size > d.Length - pos)
+                    break;
                 int valueStart = pos;
                 if (type == "chlist")
                 {

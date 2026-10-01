@@ -42,20 +42,27 @@ namespace DAVFX.TextureChannelPacker.Codecs
                 throw new PackException("zlib preset dictionaries are not supported.");
 
             var result = new byte[expectedLength];
-            using (var input = new MemoryStream(data, offset + 2, count - 2, false))
-            using (var inflate = new DeflateStream(input, CompressionMode.Decompress))
+            int read = 0;
+            try
             {
-                int read = 0;
-                while (read < expectedLength)
+                using (var input = new MemoryStream(data, offset + 2, count - 2, false))
+                using (var inflate = new DeflateStream(input, CompressionMode.Decompress))
                 {
-                    int n = inflate.Read(result, read, expectedLength - read);
-                    if (n <= 0)
-                        break;
-                    read += n;
+                    while (read < expectedLength)
+                    {
+                        int n = inflate.Read(result, read, expectedLength - read);
+                        if (n <= 0)
+                            break;
+                        read += n;
+                    }
                 }
-                if (read != expectedLength)
-                    throw new PackException($"Compressed data is truncated ({read} of {expectedLength} bytes).");
             }
+            catch (Exception e) when (e is InvalidDataException || e is IOException || e is NotSupportedException)
+            {
+                throw new PackException("Compressed data is corrupted.", e);
+            }
+            if (read != expectedLength)
+                throw new PackException($"Compressed data is truncated ({read} of {expectedLength} bytes).");
             return result;
         }
 

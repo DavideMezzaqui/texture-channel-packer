@@ -120,6 +120,12 @@ namespace DAVFX.TextureChannelPacker
                     {
                         Debug.LogError($"[Channel Packer] {title} failed on {textures[i].name}: {e.Message}", textures[i]);
                     }
+                    catch (Exception e)
+                    {
+                        // Keep going with the other textures; the full error is in the Console.
+                        Debug.LogError($"[Channel Packer] {title} failed on {textures[i].name}: {e.GetType().Name}: {e.Message}", textures[i]);
+                        Debug.LogException(e);
+                    }
                 }
             }
             finally

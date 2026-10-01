@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using UnityEditor;
@@ -8,9 +9,14 @@ namespace DAVFX.TextureChannelPacker
 {
     /// <summary>
     /// The whole Channel Packer interface as an embeddable IMGUI view.
-    /// Host it in any EditorWindow (or an IMGUIContainer) by calling <see cref="OnGUI"/>; the state lives in
-    /// <see cref="PackerState"/>, which the host serializes on <c>undoTarget</c> for Undo support.
+    /// Host it in any EditorWindow (or an IMGUIContainer) by calling <see cref="OnGUI"/>. The state lives in a
+    /// <see cref="PackerState"/> serialized by the host on <c>undoTarget</c>, which gives Undo support.
     /// </summary>
+    /// <remarks>
+    /// IMGUI runs every event twice (Layout, then the event itself) and both passes must draw the same controls.
+    /// Every change that adds or removes controls (mode, layout, foldouts, slots...) is therefore deferred to the
+    /// end of the pass, and file system checks that decide what is drawn are only done during Layout.
+    /// </remarks>
     public sealed class ChannelPackerView : IDisposable
     {
         public const string PackageName = "com.davfx.texture-channel-packer";
@@ -18,6 +24,7 @@ namespace DAVFX.TextureChannelPacker
         const float WideLayoutWidth = 820f;
         const int PreviewResolution = 512;
         const string UndoName = "Channel Packer";
+        const string Title = "Texture Channel Packer";
 
         static readonly string[] s_LayoutNames = { "RGBA", "RGB", "Grayscale", "Grayscale + Alpha" };
         static readonly string[] s_SizeModeNames = { "Largest input", "Smallest input", "Same as input", "Custom" };
@@ -31,10 +38,11 @@ namespace DAVFX.TextureChannelPacker
         static readonly string[] s_ConversionNames = { "None", "sRGB to Linear", "Linear to sRGB" };
         static readonly int[] s_CommonSizes = { 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192 };
 
-        readonly PackerState m_State;
+        readonly Func<PackerState> m_StateProvider;
         readonly UnityEngine.Object m_UndoTarget;
         readonly Action m_Repaint;
         readonly PreviewBuilder m_Preview = new PreviewBuilder();
+        readonly List<Action> m_Deferred = new List<Action>();
 
         PixelImage[] m_Images = new PixelImage[0];
         string[] m_SlotErrors = new string[0];
@@ -52,21 +60,42 @@ namespace DAVFX.TextureChannelPacker
         Texture2D m_LastOutput;
         string m_LastResult;
         Vector2 m_Scroll;
+        bool m_OutputExists;
+        string m_SplitSettingsError;
         bool m_RefreshScheduled;
+        bool m_PackScheduled;
         bool m_Disposed;
         GUIStyle m_Padding;
 
-        public ChannelPackerView(PackerState state, UnityEngine.Object undoTarget, Action repaint)
+        /// <summary>
+        /// Recommended constructor. The provider is read on every use, so the view keeps working when Undo or a
+        /// domain reload replaces the state object.
+        /// </summary>
+        public ChannelPackerView(Func<PackerState> stateProvider, UnityEngine.Object undoTarget, Action repaint)
         {
-            m_State = state ?? throw new ArgumentNullException(nameof(state));
+            m_StateProvider = stateProvider ?? throw new ArgumentNullException(nameof(stateProvider));
             m_UndoTarget = undoTarget;
             m_Repaint = repaint;
-            m_State.EnsureInitialized();
-            m_LastFirstTexture = m_State.inputs.Count > 0 ? m_State.inputs[0].texture : null;
+            var state = State ?? throw new ArgumentException("The state provider returned null.", nameof(stateProvider));
+            state.EnsureInitialized();
+            m_LastFirstTexture = state.inputs.Count > 0 ? state.inputs[0].texture : null;
             MarkDirty();
         }
 
-        public PackerState State => m_State;
+        /// <summary>For a state object that is never replaced. Hosts with Undo should use the provider constructor.</summary>
+        public ChannelPackerView(PackerState state, UnityEngine.Object undoTarget, Action repaint)
+            : this(Constant(state), undoTarget, repaint)
+        {
+        }
+
+        static Func<PackerState> Constant(PackerState state)
+        {
+            if (state == null)
+                throw new ArgumentNullException(nameof(state));
+            return () => state;
+        }
+
+        public PackerState State => m_StateProvider();
 
         /// <summary>Schedules a refresh of decoded inputs, validation and preview outside of OnGUI.</summary>
         public void MarkDirty()
@@ -81,16 +110,20 @@ namespace DAVFX.TextureChannelPacker
         {
             m_Disposed = true;
             EditorApplication.delayCall -= DelayedRefresh;
+            EditorApplication.delayCall -= RunPack;
+            EditorApplication.delayCall -= RunSplit;
             m_Preview.Dispose();
         }
 
-        /// <summary>Fills slots with textures (by name for presets that define keywords).</summary>
+        /// <summary>Replaces the inputs with these textures (matched by name for presets that know the maps).</summary>
         public void AssignTextures(Texture2D[] textures)
         {
             RecordUndo();
-            m_State.mode = PackerMode.Pack;
-            m_State.AssignTextures(textures, true);
+            var state = State;
+            state.mode = PackerMode.Pack;
+            state.AssignTextures(textures, true);
             MarkDirty();
+            m_Repaint?.Invoke();
         }
 
         void DelayedRefresh()
@@ -108,10 +141,32 @@ namespace DAVFX.TextureChannelPacker
                 Undo.RecordObject(m_UndoTarget, UndoName);
         }
 
+        /// <summary>Applies a change from outside OnGUI (menus, delayed dialogs).</summary>
         void Change(Action change)
         {
+            if (m_Disposed)
+                return;
             RecordUndo();
             change();
+            MarkDirty();
+            m_Repaint?.Invoke();
+        }
+
+        /// <summary>Applies a change that alters which controls are drawn once the current IMGUI pass is over.</summary>
+        void Defer(Action change)
+        {
+            m_Deferred.Add(change);
+        }
+
+        void ApplyDeferred()
+        {
+            if (m_Deferred.Count == 0)
+                return;
+            var actions = m_Deferred.ToArray();
+            m_Deferred.Clear();
+            RecordUndo();
+            foreach (var action in actions)
+                action();
             MarkDirty();
             m_Repaint?.Invoke();
         }
@@ -120,8 +175,9 @@ namespace DAVFX.TextureChannelPacker
 
         void Refresh()
         {
-            m_State.Sanitize();
-            int n = m_State.inputs.Count;
+            var state = State;
+            state.Sanitize();
+            int n = state.inputs.Count;
             m_Images = new PixelImage[n];
             m_SlotErrors = new string[n];
             bool progress = false;
@@ -129,12 +185,12 @@ namespace DAVFX.TextureChannelPacker
             {
                 for (int i = 0; i < n; i++)
                 {
-                    var texture = m_State.inputs[i].texture;
+                    var texture = state.inputs[i].texture;
                     if (texture == null)
                         continue;
                     if (DecodeCache.Peek(texture) == null)
                     {
-                        EditorUtility.DisplayProgressBar("Texture Channel Packer", "Reading " + texture.name, (float)i / n);
+                        EditorUtility.DisplayProgressBar(Title, "Reading " + texture.name, (float)i / n);
                         progress = true;
                     }
                     m_Images[i] = TryDecode(texture, out m_SlotErrors[i]);
@@ -142,14 +198,14 @@ namespace DAVFX.TextureChannelPacker
 
                 m_SplitImage = null;
                 m_SplitError = null;
-                if (m_State.mode == PackerMode.Split && m_State.splitSource != null)
+                if (state.mode == PackerMode.Split && state.splitSource != null)
                 {
-                    if (DecodeCache.Peek(m_State.splitSource) == null)
+                    if (DecodeCache.Peek(state.splitSource) == null)
                     {
-                        EditorUtility.DisplayProgressBar("Texture Channel Packer", "Reading " + m_State.splitSource.name, 0.5f);
+                        EditorUtility.DisplayProgressBar(Title, "Reading " + state.splitSource.name, 0.5f);
                         progress = true;
                     }
-                    m_SplitImage = TryDecode(m_State.splitSource, out m_SplitError);
+                    m_SplitImage = TryDecode(state.splitSource, out m_SplitError);
                 }
             }
             finally
@@ -158,28 +214,36 @@ namespace DAVFX.TextureChannelPacker
                     EditorUtility.ClearProgressBar();
             }
 
-            // Presets that keep the source alpha follow the first input.
-            var first = n > 0 ? m_State.inputs[0].texture : null;
+            // Presets that keep the source alpha follow the first input: RGBA when it has alpha, RGB otherwise.
+            var first = n > 0 ? state.inputs[0].texture : null;
             if (first != m_LastFirstTexture)
             {
                 m_LastFirstTexture = first;
-                if (m_State.followInputAlpha && m_Images.Length > 0 && m_Images[0] != null &&
-                    (m_State.recipe.layout == OutputLayout.RGBA || m_State.recipe.layout == OutputLayout.RGB))
-                    m_State.recipe.layout = m_Images[0].HasAlpha ? OutputLayout.RGBA : OutputLayout.RGB;
+                state.layoutFollowsInputPending = state.followInputAlpha;
+            }
+            if (state.layoutFollowsInputPending && n > 0 && m_Images[0] != null)
+            {
+                state.layoutFollowsInputPending = false;
+                if (state.recipe.layout == OutputLayout.RGBA || state.recipe.layout == OutputLayout.RGB)
+                    state.recipe.layout = m_Images[0].HasAlpha ? OutputLayout.RGBA : OutputLayout.RGB;
             }
 
-            m_Used = ChannelPacker.UsedSlots(m_State.recipe, n);
+            m_Used = ChannelPacker.UsedSlots(state.recipe, n);
             var infos = new InputInfo[n];
+            var hasTexture = new bool[n];
             for (int i = 0; i < n; i++)
+            {
                 infos[i] = m_Used[i] ? InputInfo.From(m_Images[i]) : null;
-            m_Plan = PackValidator.Validate(m_State.recipe, infos, m_State.size, m_State.output);
-            for (int i = 0; i < n; i++)
+                hasTexture[i] = state.inputs[i].texture != null;
+            }
+            m_Plan = PackValidator.Validate(state.recipe, infos, state.size, state.output, hasTexture);
+            for (int i = n - 1; i >= 0; i--)
             {
                 if (m_SlotErrors[i] != null)
                     m_Plan.Issues.Insert(0, new PackIssue(IssueSeverity.Error, $"Input {PackEngine.SlotName(i)}: {m_SlotErrors[i]}"));
             }
 
-            BuildPreview();
+            BuildPreview(state);
         }
 
         static PixelImage TryDecode(Texture2D texture, out string error)
@@ -201,7 +265,7 @@ namespace DAVFX.TextureChannelPacker
             return null;
         }
 
-        void BuildPreview()
+        void BuildPreview(PackerState state)
         {
             m_PreviewImage = null;
             m_PreviewError = null;
@@ -214,14 +278,14 @@ namespace DAVFX.TextureChannelPacker
 
             Resampler.FitInside(m_Plan.Width, m_Plan.Height, PreviewResolution, out int w, out int h);
             var inputs = new PixelImage[m_Images.Length];
-            for (int i = 0; i < inputs.Length; i++)
-            {
-                if (m_Images[i] != null && m_Used[i])
-                    inputs[i] = DecodeCache.GetPreview(m_State.inputs[i].texture, PreviewResolution);
-            }
             try
             {
-                m_PreviewImage = PackEngine.Evaluate(m_State.recipe, inputs, w, h, ResampleFilter.Bilinear);
+                for (int i = 0; i < inputs.Length; i++)
+                {
+                    if (m_Images[i] != null && m_Used[i])
+                        inputs[i] = DecodeCache.GetPreview(state.inputs[i].texture, PreviewResolution);
+                }
+                m_PreviewImage = PackEngine.Evaluate(state.recipe, inputs, w, h, ResampleFilter.Bilinear);
             }
             catch (PackException e)
             {
@@ -235,45 +299,59 @@ namespace DAVFX.TextureChannelPacker
         {
             if (m_Disposed)
                 return;
-            m_State.Sanitize();
+            var state = State;
+            if (state == null)
+                return;
+            state.Sanitize();
             if (m_Padding == null)
                 m_Padding = new GUIStyle { padding = new RectOffset(10, 10, 4, 10) };
 
             var type = Event.current.type;
+            if (type == EventType.Layout)
+            {
+                m_OutputExists = SafeFileExists(state.output.AssetPath);
+                m_SplitSettingsError = state.splitSource != null ? ChannelPacker.SplitError(state.splitSource, state.split) : null;
+            }
             if (type != EventType.Layout && type != EventType.Repaint)
                 RecordUndo();
 
-            EditorGUI.BeginChangeCheck();
-            DrawToolbar();
-            m_Scroll = EditorGUILayout.BeginScrollView(m_Scroll);
-            EditorGUILayout.BeginVertical(m_Padding);
-            if (m_State.mode == PackerMode.Pack)
-                DrawPack();
-            else
-                DrawSplit();
-            EditorGUILayout.EndVertical();
-            EditorGUILayout.EndScrollView();
-            DrawFooter();
-            if (EditorGUI.EndChangeCheck())
+            bool changed = false;
+            try
+            {
+                EditorGUI.BeginChangeCheck();
+                DrawToolbar(state);
+                m_Scroll = EditorGUILayout.BeginScrollView(m_Scroll);
+                EditorGUILayout.BeginVertical(m_Padding);
+                if (state.mode == PackerMode.Pack)
+                    DrawPack(state);
+                else
+                    DrawSplit(state);
+                EditorGUILayout.EndVertical();
+                EditorGUILayout.EndScrollView();
+                DrawFooter(state);
+                changed = EditorGUI.EndChangeCheck();
+            }
+            finally
+            {
+                ApplyDeferred();
+            }
+            if (changed)
                 MarkDirty();
         }
 
-        void DrawToolbar()
+        void DrawToolbar(PackerState state)
         {
             EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
-            var mode = (PackerMode)GUILayout.Toolbar((int)m_State.mode, new[] { "Pack", "Split" }, EditorStyles.toolbarButton, GUILayout.Width(130));
-            if (mode != m_State.mode)
-            {
-                m_State.mode = mode;
-                MarkDirty();
-            }
+            var mode = (PackerMode)GUILayout.Toolbar((int)state.mode, new[] { "Pack", "Split" }, EditorStyles.toolbarButton, GUILayout.Width(130));
+            if (mode != state.mode)
+                Defer(() => state.mode = mode);
             GUILayout.FlexibleSpace();
-            if (m_State.mode == PackerMode.Pack)
+            if (state.mode == PackerMode.Pack)
             {
-                var content = new GUIContent("Preset: " + m_State.presetName, "Ready-made recipes. Applying one replaces the channel setup, inputs are kept.");
+                var content = new GUIContent("Preset: " + state.presetName, "Ready-made recipes. Applying one replaces the channel setup, inputs are kept.");
                 var rect = GUILayoutUtility.GetRect(content, EditorStyles.toolbarDropDown, GUILayout.MaxWidth(320));
                 if (EditorGUI.DropdownButton(rect, content, FocusType.Passive, EditorStyles.toolbarDropDown))
-                    ShowPresetMenu(rect);
+                    ShowPresetMenu(state, rect);
             }
             if (GUILayout.Button(new GUIContent("Help", "Open the README"), EditorStyles.toolbarButton, GUILayout.Width(40)))
             {
@@ -287,13 +365,13 @@ namespace DAVFX.TextureChannelPacker
             EditorGUILayout.EndHorizontal();
         }
 
-        void ShowPresetMenu(Rect rect)
+        void ShowPresetMenu(PackerState state, Rect rect)
         {
             var menu = new GenericMenu();
             foreach (var preset in PackPresets.All)
             {
                 var p = preset;
-                menu.AddItem(new GUIContent(preset.MenuPath), preset.Name == m_State.presetName, () => Change(() => m_State.ApplyPreset(p)));
+                menu.AddItem(new GUIContent(preset.MenuPath), preset.Name == state.presetName, () => Change(() => State.ApplyPreset(p)));
                 if (string.IsNullOrEmpty(preset.Category))
                     menu.AddSeparator(string.Empty);
             }
@@ -302,9 +380,9 @@ namespace DAVFX.TextureChannelPacker
 
         // ------------------------------------------------------------------ pack layout
 
-        void DrawPack()
+        void DrawPack(PackerState state)
         {
-            var preset = m_State.CurrentPreset;
+            var preset = state.CurrentPreset;
             if (preset != null && !string.IsNullOrEmpty(preset.Description))
                 GUILayout.Label(preset.Description, PackerStyles.Info);
 
@@ -313,64 +391,71 @@ namespace DAVFX.TextureChannelPacker
             {
                 EditorGUILayout.BeginHorizontal();
                 EditorGUILayout.BeginVertical(GUILayout.Width(width * 0.54f));
-                DrawInputs();
-                DrawChannels();
+                DrawInputs(state);
+                DrawChannels(state);
                 EditorGUILayout.EndVertical();
                 GUILayout.Space(12);
                 EditorGUILayout.BeginVertical();
-                DrawPreview();
-                DrawOutput();
+                DrawPreview(state);
+                DrawOutput(state);
                 EditorGUILayout.EndVertical();
                 EditorGUILayout.EndHorizontal();
             }
             else
             {
-                DrawInputs();
-                DrawChannels();
-                DrawPreview();
-                DrawOutput();
+                DrawInputs(state);
+                DrawChannels(state);
+                DrawPreview(state);
+                DrawOutput(state);
             }
             DrawIssues();
         }
 
         // ------------------------------------------------------------------ inputs
 
-        void DrawInputs()
+        void DrawInputs(PackerState state)
         {
             EditorGUILayout.BeginHorizontal();
             GUILayout.Label("Inputs", PackerStyles.Section);
             GUILayout.FlexibleSpace();
-            using (new EditorGUI.DisabledScope(!Selection.objects.OfType<Texture2D>().Any()))
+            var selected = Selection.objects.OfType<Texture2D>().ToArray();
+            using (new EditorGUI.DisabledScope(selected.Length == 0))
             {
-                if (GUILayout.Button(new GUIContent("Use Selection", "Assign the textures selected in the Project window (matched by name when the preset knows the maps)."), EditorStyles.miniButton))
-                    AssignTextures(Selection.objects.OfType<Texture2D>().ToArray());
+                if (GUILayout.Button(new GUIContent("Use Selection", "Replace the inputs with the textures selected in the Project window (matched by name when the preset knows the maps)."), EditorStyles.miniButton))
+                    Defer(() => state.AssignTextures(selected, true));
             }
             EditorGUILayout.EndHorizontal();
             Separator();
 
             var area = EditorGUILayout.BeginVertical();
-            for (int i = 0; i < m_State.inputs.Count; i++)
-                DrawSlot(i);
+            // Before the fields: an object field under the mouse would otherwise take only the first texture.
+            HandleDrop(state, area);
+            for (int i = 0; i < state.inputs.Count; i++)
+                DrawSlot(state, i);
             EditorGUILayout.BeginHorizontal();
             GUILayout.FlexibleSpace();
-            using (new EditorGUI.DisabledScope(m_State.inputs.Count >= PackerState.MaxInputs))
+            using (new EditorGUI.DisabledScope(state.inputs.Count >= PackerState.MaxInputs))
             {
                 if (GUILayout.Button(new GUIContent("+", "Add an input slot"), EditorStyles.miniButtonLeft, GUILayout.Width(26)))
-                    m_State.inputs.Add(new InputSlot());
+                    Defer(() => state.inputs.Add(new InputSlot()));
             }
-            using (new EditorGUI.DisabledScope(m_State.inputs.Count <= 1))
+            using (new EditorGUI.DisabledScope(state.inputs.Count <= 1))
             {
                 if (GUILayout.Button(new GUIContent("-", "Remove the last input slot"), EditorStyles.miniButtonRight, GUILayout.Width(26)))
-                    m_State.inputs.RemoveAt(m_State.inputs.Count - 1);
+                    Defer(() =>
+                    {
+                        if (state.inputs.Count > 1)
+                            state.inputs.RemoveAt(state.inputs.Count - 1);
+                        state.UpdateAutoName();
+                    });
             }
             EditorGUILayout.EndHorizontal();
             EditorGUILayout.EndVertical();
-            HandleDrop(area);
         }
 
-        void DrawSlot(int i)
+        void DrawSlot(PackerState state, int i)
         {
-            var slot = m_State.inputs[i];
+            var slot = state.inputs[i];
             bool used = i < m_Used.Length && m_Used[i];
 
             EditorGUILayout.BeginHorizontal();
@@ -381,17 +466,11 @@ namespace DAVFX.TextureChannelPacker
                 used ? PackerStyles.SlotLabel : PackerStyles.Info, GUILayout.Width(104), GUILayout.Height(18));
             var texture = (Texture2D)EditorGUILayout.ObjectField(slot.texture, typeof(Texture2D), false, GUILayout.Height(18));
             if (texture != slot.texture)
-            {
-                slot.texture = texture;
-                m_State.UpdateAutoName();
-            }
+                Defer(() => SetSlotTexture(state, slot, texture));
             using (new EditorGUI.DisabledScope(slot.texture == null))
             {
                 if (GUILayout.Button(new GUIContent("x", "Clear"), EditorStyles.miniButton, GUILayout.Width(20)))
-                {
-                    slot.texture = null;
-                    m_State.UpdateAutoName();
-                }
+                    Defer(() => SetSlotTexture(state, slot, null));
             }
             EditorGUILayout.EndHorizontal();
 
@@ -400,7 +479,7 @@ namespace DAVFX.TextureChannelPacker
             string error = i < m_SlotErrors.Length ? m_SlotErrors[i] : null;
             if (error != null)
                 info = "Error: " + error;
-            else if (image != null)
+            else if (image != null && slot.texture != null)
                 info = $"{image.Width} x {image.Height}  ·  {image.SourceDescription}{(image.IsLossySource ? "  ·  lossy source" : string.Empty)}";
             else if (slot.texture != null)
                 info = "Reading...";
@@ -418,7 +497,13 @@ namespace DAVFX.TextureChannelPacker
             GUILayout.Space(2);
         }
 
-        void HandleDrop(Rect area)
+        static void SetSlotTexture(PackerState state, InputSlot slot, Texture2D texture)
+        {
+            slot.texture = texture;
+            state.UpdateAutoName();
+        }
+
+        void HandleDrop(PackerState state, Rect area)
         {
             var evt = Event.current;
             if ((evt.type != EventType.DragUpdated && evt.type != EventType.DragPerform) || !area.Contains(evt.mousePosition))
@@ -431,55 +516,58 @@ namespace DAVFX.TextureChannelPacker
             if (evt.type == EventType.DragPerform)
             {
                 DragAndDrop.AcceptDrag();
-                RecordUndo();
-                m_State.AssignTextures(textures, false);
-                MarkDirty();
+                Defer(() => state.AssignTextures(textures, false));
             }
             evt.Use();
         }
 
         // ------------------------------------------------------------------ channels
 
-        void DrawChannels()
+        void DrawChannels(PackerState state)
         {
             GUILayout.Space(6);
             EditorGUILayout.BeginHorizontal();
             GUILayout.Label("Output Channels", PackerStyles.Section);
             GUILayout.FlexibleSpace();
             GUILayout.Label("Layout", PackerStyles.Info, GUILayout.Width(40));
-            m_State.recipe.layout = (OutputLayout)EditorGUILayout.Popup((int)m_State.recipe.layout, s_LayoutNames, GUILayout.Width(130));
+            var layout = (OutputLayout)EditorGUILayout.Popup((int)state.recipe.layout, s_LayoutNames, GUILayout.Width(130));
+            if (layout != state.recipe.layout)
+                Defer(() => state.recipe.layout = layout);
             EditorGUILayout.EndHorizontal();
             Separator();
 
-            foreach (int c in PackRecipe.ActiveChannels(m_State.recipe.layout))
-                DrawChannel(c);
+            foreach (int c in PackRecipe.ActiveChannels(state.recipe.layout))
+                DrawChannel(state, c);
             GUILayout.Label("Order of operations: source, combine, color conversion, invert, levels. Channels without changes are copied bit for bit.", PackerStyles.Info);
         }
 
-        void DrawChannel(int c)
+        void DrawChannel(PackerState state, int c)
         {
-            var layout = m_State.recipe.layout;
-            var ch = m_State.recipe.channels[c];
+            var layout = state.recipe.layout;
+            var ch = state.recipe.channels[c];
 
             EditorGUILayout.BeginVertical(PackerStyles.Card);
             EditorGUILayout.BeginHorizontal();
             var chip = GUILayoutUtility.GetRect(22, 18, GUILayout.Width(22), GUILayout.Height(18));
             PackerStyles.DrawChip(chip, PackerStyles.ChannelLetter(layout, c), PackerStyles.ChannelColor(layout, c));
             GUILayout.Space(4);
-            OperandField(ch.source);
+            OperandField(state, ch.source);
             if (ch.source.kind == OperandKind.Constant)
                 ConstantFields(ch.source);
             ch.invert = GUILayout.Toggle(ch.invert, new GUIContent("Invert", "1 - value"), EditorStyles.miniButton, GUILayout.Width(48), GUILayout.Height(18));
-            m_State.expanded[c] = GUILayout.Toggle(m_State.expanded[c], new GUIContent(m_State.expanded[c] ? "Less" : "More", "Combine, color conversion and levels"),
+            bool expanded = state.expanded[c];
+            bool toggled = GUILayout.Toggle(expanded, new GUIContent(expanded ? "Less" : "More", "Combine, color conversion and levels"),
                 EditorStyles.miniButton, GUILayout.Width(42), GUILayout.Height(18));
+            if (toggled != expanded)
+                Defer(() => state.expanded[c] = toggled);
             EditorGUILayout.EndHorizontal();
 
-            string note = FallbackNote(ch.source);
+            string note = FallbackNote(state, ch.source);
             if (note != null)
                 Indented(note);
 
-            if (m_State.expanded[c])
-                DrawAdvanced(ch);
+            if (expanded)
+                DrawAdvanced(state, ch);
             else
             {
                 string summary = Summary(ch);
@@ -489,16 +577,21 @@ namespace DAVFX.TextureChannelPacker
             EditorGUILayout.EndVertical();
         }
 
-        string FallbackNote(Operand op)
+        static string FallbackNote(PackerState state, Operand op)
         {
             if (op.kind != OperandKind.Texture)
                 return null;
-            bool empty = op.input >= m_State.inputs.Count || m_State.inputs[op.input].texture == null;
+            bool empty = op.input < 0 || op.input >= state.inputs.Count || state.inputs[op.input].texture == null;
             if (!empty)
                 return null;
             return op.hasFallback
-                ? $"Input {PackEngine.SlotName(op.input)} is empty: uses {op.fallback.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)} ({ColorMath.Quantize(op.fallback, 255)}/255)"
+                ? $"Input {PackEngine.SlotName(op.input)} is empty: uses {FormatValue(op.fallback)} ({ColorMath.Quantize(op.fallback, 255)}/255)"
                 : $"Input {PackEngine.SlotName(op.input)} is empty";
+        }
+
+        static string FormatValue(float value)
+        {
+            return value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
         }
 
         static void Indented(string text)
@@ -509,7 +602,7 @@ namespace DAVFX.TextureChannelPacker
             EditorGUILayout.EndHorizontal();
         }
 
-        void DrawAdvanced(ChannelRecipe ch)
+        void DrawAdvanced(PackerState state, ChannelRecipe ch)
         {
             const float labelWidth = 62;
             GUILayout.Space(2);
@@ -517,11 +610,13 @@ namespace DAVFX.TextureChannelPacker
             EditorGUILayout.BeginHorizontal();
             GUILayout.Space(26);
             GUILayout.Label("Combine", GUILayout.Width(labelWidth));
-            ch.combine = (CombineOp)EditorGUILayout.Popup((int)ch.combine, s_CombineNames, GUILayout.Width(96));
+            var combine = (CombineOp)EditorGUILayout.Popup((int)ch.combine, s_CombineNames, GUILayout.Width(96));
+            if (combine != ch.combine)
+                Defer(() => ch.combine = combine);
             if (ch.combine != CombineOp.None)
             {
                 GUILayout.Label("with", GUILayout.Width(30));
-                OperandField(ch.other);
+                OperandField(state, ch.other);
                 if (ch.other.kind == OperandKind.Constant)
                     ConstantFields(ch.other);
             }
@@ -538,15 +633,20 @@ namespace DAVFX.TextureChannelPacker
             EditorGUILayout.BeginHorizontal();
             GUILayout.Space(26);
             GUILayout.Label(new GUIContent("Levels", "Remap the input range, apply gamma, remap to the output range."), GUILayout.Width(labelWidth));
-            ch.useLevels = EditorGUILayout.Toggle(ch.useLevels, GUILayout.Width(16));
+            bool useLevels = EditorGUILayout.Toggle(ch.useLevels, GUILayout.Width(16));
+            if (useLevels != ch.useLevels)
+                Defer(() => ch.useLevels = useLevels);
             GUILayout.FlexibleSpace();
             if (GUILayout.Button(new GUIContent("Reset", "Remove combine, conversion, invert and levels"), EditorStyles.miniButton, GUILayout.Width(48)))
             {
-                ch.combine = CombineOp.None;
-                ch.conversion = ColorConversion.None;
-                ch.invert = false;
-                ch.useLevels = false;
-                ch.levels = new Levels();
+                Defer(() =>
+                {
+                    ch.combine = CombineOp.None;
+                    ch.conversion = ColorConversion.None;
+                    ch.invert = false;
+                    ch.useLevels = false;
+                    ch.levels = new Levels();
+                });
             }
             EditorGUILayout.EndHorizontal();
 
@@ -574,9 +674,9 @@ namespace DAVFX.TextureChannelPacker
             EditorGUILayout.EndHorizontal();
         }
 
-        string Summary(ChannelRecipe ch)
+        static string Summary(ChannelRecipe ch)
         {
-            var parts = new System.Collections.Generic.List<string>();
+            var parts = new List<string>();
             if (ch.combine != CombineOp.None)
                 parts.Add($"{s_CombineNames[(int)ch.combine]} {OperandLabel(ch.other)}");
             if (ch.conversion != ColorConversion.None)
@@ -586,23 +686,24 @@ namespace DAVFX.TextureChannelPacker
             return string.Join("  ·  ", parts);
         }
 
-        void OperandField(Operand op)
+        void OperandField(PackerState state, Operand op)
         {
-            var content = new GUIContent(OperandLabel(op), OperandTooltip(op));
+            var content = new GUIContent(OperandLabel(op), OperandTooltip(state, op));
             var rect = GUILayoutUtility.GetRect(content, EditorStyles.popup, GUILayout.MinWidth(90), GUILayout.Height(18));
             if (EditorGUI.DropdownButton(rect, content, FocusType.Keyboard, EditorStyles.popup))
-                ShowOperandMenu(op, rect);
+                ShowOperandMenu(state, op, rect);
         }
 
-        void ShowOperandMenu(Operand op, Rect rect)
+        void ShowOperandMenu(PackerState state, Operand op, Rect rect)
         {
             var menu = new GenericMenu();
             menu.AddItem(new GUIContent("Constant value"), op.kind == OperandKind.Constant, () => Change(() => op.kind = OperandKind.Constant));
             menu.AddSeparator(string.Empty);
-            for (int i = 0; i < m_State.inputs.Count; i++)
+            for (int i = 0; i < state.inputs.Count; i++)
             {
-                var slot = m_State.inputs[i];
-                string slotName = $"{PackEngine.SlotName(i)}  {slot.label}{(slot.texture != null ? "  (" + slot.texture.name + ")" : "  (empty)")}";
+                var slot = state.inputs[i];
+                string texture = slot.texture != null ? MenuSafe(slot.texture.name) : "empty";
+                string slotName = $"{PackEngine.SlotName(i)}  {MenuSafe(slot.label)}  ({texture})";
                 foreach (ChannelSource source in Enum.GetValues(typeof(ChannelSource)))
                 {
                     int input = i;
@@ -619,6 +720,14 @@ namespace DAVFX.TextureChannelPacker
             menu.DropDown(rect);
         }
 
+        /// <summary>Menu paths treat '/' as a submenu and '%', '#', '&amp;' as shortcut markers.</summary>
+        static string MenuSafe(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return string.Empty;
+            return text.Replace('/', '-').Replace("%", string.Empty).Replace("#", string.Empty).Replace("&", "+");
+        }
+
         static void ConstantFields(Operand op)
         {
             op.constant = EditorGUILayout.Slider(op.constant, 0f, 1f, GUILayout.MinWidth(110));
@@ -628,18 +737,18 @@ namespace DAVFX.TextureChannelPacker
                 op.constant = Mathf.Clamp(edited, 0, 255) / 255f;
         }
 
-        string OperandLabel(Operand op)
+        static string OperandLabel(Operand op)
         {
             if (op.kind == OperandKind.Constant)
                 return "Constant";
             return $"{PackEngine.SlotName(op.input)} · {SourceName(op.channel)}";
         }
 
-        string OperandTooltip(Operand op)
+        static string OperandTooltip(PackerState state, Operand op)
         {
             if (op.kind == OperandKind.Constant)
                 return "A fixed value for every pixel";
-            string label = op.input < m_State.inputs.Count ? m_State.inputs[op.input].label : "missing slot";
+            string label = op.input >= 0 && op.input < state.inputs.Count ? state.inputs[op.input].label : "missing slot";
             return $"Input {PackEngine.SlotName(op.input)} ({label}), {SourceName(op.channel)}";
         }
 
@@ -660,9 +769,9 @@ namespace DAVFX.TextureChannelPacker
 
         // ------------------------------------------------------------------ preview
 
-        void DrawPreview()
+        void DrawPreview(PackerState state)
         {
-            var layout = m_State.recipe.layout;
+            var layout = state.recipe.layout;
             bool gray = PackRecipe.IsGray(layout);
             bool alpha = PackRecipe.HasAlpha(layout);
 
@@ -680,7 +789,7 @@ namespace DAVFX.TextureChannelPacker
                     ? new[] { PreviewMode.Color, PreviewMode.Red, PreviewMode.Green, PreviewMode.Blue, PreviewMode.Alpha }
                     : new[] { PreviewMode.Color, PreviewMode.Red, PreviewMode.Green, PreviewMode.Blue };
             }
-            int current = Array.IndexOf(modes, (PreviewMode)m_State.previewMode);
+            int current = Array.IndexOf(modes, (PreviewMode)state.previewMode);
             if (current < 0)
                 current = 0;
 
@@ -690,8 +799,8 @@ namespace DAVFX.TextureChannelPacker
             int selected = GUILayout.Toolbar(current, names, EditorStyles.miniButton, GUILayout.Width(names.Length * 34));
             EditorGUILayout.EndHorizontal();
             Separator();
-            var mode = modes[selected];
-            m_State.previewMode = (int)mode;
+            var mode = modes[Mathf.Clamp(selected, 0, modes.Length - 1)];
+            state.previewMode = (int)mode;
 
             if (m_PreviewImage != null && (m_PreviewTextureDirty || mode != m_BuiltMode || m_Preview.Texture == null))
             {
@@ -711,13 +820,13 @@ namespace DAVFX.TextureChannelPacker
             else
             {
                 string message = m_PreviewError ?? "Add a texture or set a constant to see the result.";
-                GUI.Label(area, message, new GUIStyle(PackerStyles.Info) { alignment = TextAnchor.MiddleCenter });
+                GUI.Label(area, message, PackerStyles.CenteredInfo);
             }
 
             if (m_Plan != null && m_Plan.Width > 0)
             {
                 string depth = OutputSettings.DepthName(m_Plan.ResolvedDepth);
-                GUILayout.Label($"Output {m_Plan.Width} x {m_Plan.Height}  ·  {m_State.output.format} {depth}  ·  {s_LayoutNames[(int)layout]}", PackerStyles.Info);
+                GUILayout.Label($"Output {m_Plan.Width} x {m_Plan.Height}  ·  {state.output.format} {depth}  ·  {s_LayoutNames[(int)layout]}", PackerStyles.Info);
             }
             GUILayout.Label("The preview is downscaled for speed. Pack always works at full resolution.", PackerStyles.Info);
         }
@@ -731,10 +840,10 @@ namespace DAVFX.TextureChannelPacker
 
         // ------------------------------------------------------------------ output
 
-        void DrawOutput()
+        void DrawOutput(PackerState state)
         {
-            var output = m_State.output;
-            var size = m_State.size;
+            var output = state.output;
+            var size = state.size;
             GUILayout.Space(6);
             GUILayout.Label("Output", PackerStyles.Section);
             Separator();
@@ -742,9 +851,11 @@ namespace DAVFX.TextureChannelPacker
             // Size
             EditorGUILayout.BeginHorizontal();
             Label("Size", "Output resolution");
-            size.mode = (SizeMode)EditorGUILayout.Popup((int)size.mode, s_SizeModeNames, GUILayout.Width(120));
+            var sizeMode = (SizeMode)EditorGUILayout.Popup((int)size.mode, s_SizeModeNames, GUILayout.Width(120));
+            if (sizeMode != size.mode)
+                Defer(() => size.mode = sizeMode);
             if (size.mode == SizeMode.FromInput)
-                size.referenceInput = EditorGUILayout.Popup(size.referenceInput, SlotNames(), GUILayout.Width(44));
+                size.referenceInput = EditorGUILayout.Popup(size.referenceInput, SlotNames(state), GUILayout.Width(44));
             if (size.mode == SizeMode.Custom)
             {
                 size.customWidth = Mathf.Clamp(EditorGUILayout.IntField(size.customWidth, GUILayout.Width(52)), 1, SizeSettings.MaxSize);
@@ -757,7 +868,11 @@ namespace DAVFX.TextureChannelPacker
                     foreach (int s in s_CommonSizes)
                     {
                         int value = s;
-                        menu.AddItem(new GUIContent($"{s} x {s}"), false, () => Change(() => { size.customWidth = value; size.customHeight = value; }));
+                        menu.AddItem(new GUIContent($"{s} x {s}"), false, () => Change(() =>
+                        {
+                            State.size.customWidth = value;
+                            State.size.customHeight = value;
+                        }));
                     }
                     menu.DropDown(presetRect);
                 }
@@ -773,7 +888,9 @@ namespace DAVFX.TextureChannelPacker
             // Format
             EditorGUILayout.BeginHorizontal();
             Label("Format", "PNG and TGA store 0-1 values, EXR stores float (HDR) values. All are lossless.");
-            output.format = (OutputFormat)GUILayout.Toolbar((int)output.format, s_FormatNames, EditorStyles.miniButton, GUILayout.Width(150));
+            var format = (OutputFormat)GUILayout.Toolbar((int)output.format, s_FormatNames, EditorStyles.miniButton, GUILayout.Width(150));
+            if (format != output.format)
+                Defer(() => output.format = format);
             GUILayout.FlexibleSpace();
             EditorGUILayout.EndHorizontal();
 
@@ -785,7 +902,7 @@ namespace DAVFX.TextureChannelPacker
             EditorGUILayout.BeginHorizontal();
             Label("Bit depth", "Auto picks the lowest depth that keeps every source value.");
             using (new EditorGUI.DisabledScope(depths.Length == 1))
-                output.bitDepth = depths[Mathf.Max(0, EditorGUILayout.Popup(Array.IndexOf(depths, output.bitDepth), depthNames))];
+                output.bitDepth = depths[Mathf.Clamp(EditorGUILayout.Popup(Array.IndexOf(depths, output.bitDepth), depthNames), 0, depths.Length - 1)];
             EditorGUILayout.EndHorizontal();
 
             if (output.format == OutputFormat.TGA)
@@ -802,17 +919,9 @@ namespace DAVFX.TextureChannelPacker
             EditorGUI.BeginChangeCheck();
             output.folder = EditorGUILayout.TextField(output.folder);
             if (EditorGUI.EndChangeCheck())
-                m_State.autoFolder = false;
+                state.autoFolder = false;
             if (GUILayout.Button("...", EditorStyles.miniButton, GUILayout.Width(26)))
-            {
-                string picked = PickFolder(output.folder);
-                if (picked != null)
-                {
-                    output.folder = picked;
-                    m_State.autoFolder = false;
-                    GUI.changed = true;
-                }
-            }
+                EditorApplication.delayCall += PickOutputFolder;
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.BeginHorizontal();
@@ -820,22 +929,24 @@ namespace DAVFX.TextureChannelPacker
             EditorGUI.BeginChangeCheck();
             output.fileName = EditorGUILayout.TextField(output.fileName);
             if (EditorGUI.EndChangeCheck())
-                m_State.autoName = false;
+                state.autoName = false;
             GUILayout.Label(output.Extension, GUILayout.Width(32));
-            bool auto = GUILayout.Toggle(m_State.autoName, new GUIContent("Auto", "Name from the inputs plus the preset suffix"), EditorStyles.miniButton, GUILayout.Width(40));
-            if (auto != m_State.autoName)
+            bool auto = GUILayout.Toggle(state.autoName, new GUIContent("Auto", "Name from the inputs plus the preset suffix"), EditorStyles.miniButton, GUILayout.Width(40));
+            if (auto != state.autoName)
             {
-                m_State.autoName = auto;
-                m_State.UpdateAutoName();
+                state.autoName = auto;
+                state.UpdateAutoName();
             }
             EditorGUILayout.EndHorizontal();
 
             // Import settings
             EditorGUILayout.BeginHorizontal();
             Label("Import", "Importer settings for a new file. An overwritten file keeps its own settings.");
-            output.importMode = (ImportMode)EditorGUILayout.Popup((int)output.importMode, s_ImportModeNames);
+            var importMode = (ImportMode)EditorGUILayout.Popup((int)output.importMode, s_ImportModeNames);
+            if (importMode != output.importMode)
+                Defer(() => output.importMode = importMode);
             if (output.importMode == ImportMode.CopyFromInput)
-                output.importSourceInput = EditorGUILayout.Popup(output.importSourceInput, SlotNames(), GUILayout.Width(44));
+                output.importSourceInput = EditorGUILayout.Popup(output.importSourceInput, SlotNames(state), GUILayout.Width(44));
             EditorGUILayout.EndHorizontal();
             if (output.importMode == ImportMode.ToolSettings)
             {
@@ -853,7 +964,7 @@ namespace DAVFX.TextureChannelPacker
                 EditorGUILayout.EndHorizontal();
             }
 
-            if (File.Exists(Path.GetFullPath(output.AssetPath)))
+            if (m_OutputExists)
             {
                 EditorGUILayout.HelpBox("This file already exists. It will be replaced in place: GUID, import settings and material references are kept.", MessageType.Info);
                 EditorGUILayout.BeginHorizontal();
@@ -868,25 +979,72 @@ namespace DAVFX.TextureChannelPacker
             GUILayout.Label(new GUIContent(text, tooltip), GUILayout.Width(84));
         }
 
-        string[] SlotNames()
+        static string[] SlotNames(PackerState state)
         {
-            return Enumerable.Range(0, m_State.inputs.Count).Select(PackEngine.SlotName).ToArray();
+            return Enumerable.Range(0, state.inputs.Count).Select(PackEngine.SlotName).ToArray();
         }
 
+        void PickOutputFolder()
+        {
+            if (m_Disposed)
+                return;
+            string picked = PickFolder(State.output.folder);
+            if (picked != null)
+                Change(() =>
+                {
+                    State.output.folder = picked;
+                    State.autoFolder = false;
+                });
+        }
+
+        void PickSplitFolder()
+        {
+            if (m_Disposed)
+                return;
+            string picked = PickFolder(State.split.folder);
+            if (picked != null)
+                Change(() => State.split.folder = picked);
+        }
+
+        /// <summary>Shows the folder dialog. Called from delayCall: modal dialogs inside OnGUI break the layout.</summary>
         static string PickFolder(string current)
         {
-            string start = Directory.Exists(Path.GetFullPath(current ?? "Assets")) ? Path.GetFullPath(current) : Path.GetFullPath("Assets");
+            string assets = Path.GetFullPath("Assets");
+            string start = assets;
+            try
+            {
+                string full = Path.GetFullPath(OutputSettings.NormalizeFolder(current));
+                if (Directory.Exists(full))
+                    start = full;
+            }
+            catch (Exception)
+            {
+                // Invalid characters typed in the field: start from Assets.
+            }
+
             string picked = EditorUtility.OpenFolderPanel("Output folder", start, string.Empty);
             if (string.IsNullOrEmpty(picked))
                 return null;
-            string assets = Path.GetFullPath("Assets").Replace('\\', '/');
+            assets = assets.Replace('\\', '/');
             picked = picked.Replace('\\', '/');
-            if (picked == assets)
+            if (string.Equals(picked, assets, StringComparison.OrdinalIgnoreCase))
                 return "Assets";
-            if (picked.StartsWith(assets + "/"))
+            if (picked.StartsWith(assets + "/", StringComparison.OrdinalIgnoreCase))
                 return "Assets/" + picked.Substring(assets.Length + 1);
-            EditorUtility.DisplayDialog("Texture Channel Packer", "Pick a folder inside the project's Assets folder.", "OK");
+            EditorUtility.DisplayDialog(Title, "Pick a folder inside the project's Assets folder.", "OK");
             return null;
+        }
+
+        static bool SafeFileExists(string assetPath)
+        {
+            try
+            {
+                return File.Exists(Path.GetFullPath(assetPath));
+            }
+            catch (Exception)
+            {
+                return false; // invalid characters: the validator reports them
+            }
         }
 
         static void Separator()
@@ -913,28 +1071,36 @@ namespace DAVFX.TextureChannelPacker
             }
         }
 
-        void DrawFooter()
+        void DrawFooter(PackerState state)
         {
             var rect = GUILayoutUtility.GetRect(1, 1, GUILayout.ExpandWidth(true));
             EditorGUI.DrawRect(rect, PackerStyles.Separator);
             EditorGUILayout.BeginVertical(m_Padding);
-            if (m_State.mode == PackerMode.Pack)
+            if (state.mode == PackerMode.Pack)
             {
-                bool blocked = m_Plan == null || m_Plan.HasErrors || m_RefreshScheduled;
+                bool blocked = m_Plan == null || m_Plan.HasErrors || m_RefreshScheduled || m_PackScheduled;
                 using (new EditorGUI.DisabledScope(blocked))
                 {
-                    string label = m_Plan != null && m_Plan.HasErrors ? "Fix the errors above to pack" : "Pack  " + m_State.output.fileName + m_State.output.Extension;
-                    if (GUILayout.Button(label, PackerStyles.BigButton))
+                    string label = m_Plan != null && m_Plan.HasErrors
+                        ? "Fix the errors above to pack"
+                        : "Pack  " + state.output.CleanFileName + state.output.Extension;
+                    if (GUILayout.Button(label, PackerStyles.BigButton) && !m_PackScheduled)
+                    {
+                        m_PackScheduled = true;
                         EditorApplication.delayCall += RunPack;
+                    }
                 }
             }
             else
             {
-                int count = SplitCount();
-                using (new EditorGUI.DisabledScope(m_State.splitSource == null || m_SplitImage == null || count == 0))
+                int count = SplitCount(state);
+                using (new EditorGUI.DisabledScope(state.splitSource == null || m_SplitImage == null || count == 0 || m_PackScheduled || m_SplitSettingsError != null))
                 {
-                    if (GUILayout.Button($"Split into {count} texture{(count == 1 ? string.Empty : "s")}", PackerStyles.BigButton))
+                    if (GUILayout.Button($"Split into {count} texture{(count == 1 ? string.Empty : "s")}", PackerStyles.BigButton) && !m_PackScheduled)
+                    {
+                        m_PackScheduled = true;
                         EditorApplication.delayCall += RunSplit;
+                    }
                 }
             }
 
@@ -954,17 +1120,21 @@ namespace DAVFX.TextureChannelPacker
 
         void RunPack()
         {
-            if (m_Disposed || m_Plan == null || m_Plan.HasErrors)
+            m_PackScheduled = false;
+            if (m_Disposed)
                 return;
-            var request = m_State.ToRequest();
+            var request = State.ToRequest();
             string path = request.Output.AssetPath;
-            if (File.Exists(Path.GetFullPath(path)))
+            if (SafeFileExists(path))
             {
                 string backup = request.Output.backupOnOverwrite ? $"\n\nA backup is saved in {TextureOutputWriter.BackupFolder}." : string.Empty;
                 if (!EditorUtility.DisplayDialog("Overwrite texture?",
                         $"{path} already exists.\n\nIt will be replaced in place: GUID, import settings and material references are kept.{backup}",
                         "Overwrite", "Cancel"))
+                {
+                    m_Repaint?.Invoke();
                     return;
+                }
             }
 
             try
@@ -977,12 +1147,12 @@ namespace DAVFX.TextureChannelPacker
             }
             catch (PackException e)
             {
-                EditorUtility.DisplayDialog("Texture Channel Packer", e.Message, "OK");
+                EditorUtility.DisplayDialog(Title, e.Message, "OK");
             }
             catch (Exception e)
             {
                 Debug.LogException(e);
-                EditorUtility.DisplayDialog("Texture Channel Packer", "Unexpected error: " + e.Message + "\nSee the Console for details.", "OK");
+                EditorUtility.DisplayDialog(Title, "Unexpected error: " + e.Message + "\nSee the Console for details.", "OK");
             }
             MarkDirty();
             m_Repaint?.Invoke();
@@ -990,44 +1160,41 @@ namespace DAVFX.TextureChannelPacker
 
         // ------------------------------------------------------------------ split
 
-        int SplitCount()
+        int SplitCount(PackerState state)
         {
             int count = 0;
             for (int c = 0; c < 4; c++)
             {
-                if (!m_State.split.channels[c])
+                if (!state.split.channels[c])
                     continue;
-                if (c == 3 && m_SplitImage != null && !m_SplitImage.HasAlpha && m_State.split.skipMissingAlpha)
+                if (c == 3 && m_SplitImage != null && !m_SplitImage.HasAlpha && state.split.skipMissingAlpha)
                     continue;
                 count++;
             }
             return count;
         }
 
-        void DrawSplit()
+        void DrawSplit(PackerState state)
         {
-            var split = m_State.split;
+            var split = state.split;
             GUILayout.Label("Writes each channel of a texture as a separate grayscale file, at the same bit depth.", PackerStyles.Info);
 
             GUILayout.Label("Source", PackerStyles.Section);
             Separator();
-            var source = (Texture2D)EditorGUILayout.ObjectField(m_State.splitSource, typeof(Texture2D), false, GUILayout.Height(18));
-            if (source != m_State.splitSource)
-            {
-                m_State.splitSource = source;
-                MarkDirty();
-            }
+            var source = (Texture2D)EditorGUILayout.ObjectField(state.splitSource, typeof(Texture2D), false, GUILayout.Height(18));
+            if (source != state.splitSource)
+                Defer(() => state.splitSource = source);
             if (m_SplitError != null)
                 EditorGUILayout.HelpBox(m_SplitError, MessageType.Error);
-            else if (m_SplitImage != null)
+            else if (m_SplitImage != null && state.splitSource != null)
                 GUILayout.Label($"{m_SplitImage.Width} x {m_SplitImage.Height}  ·  {m_SplitImage.SourceDescription}", PackerStyles.Info);
 
             GUILayout.Space(6);
             GUILayout.Label("Channels", PackerStyles.Section);
             Separator();
-            string baseName = m_State.splitSource != null ? m_State.splitSource.name : "Texture";
+            string baseName = state.splitSource != null ? state.splitSource.name : "Texture";
             var format = split.autoFormat
-                ? ChannelPacker.AutoFormat(m_State.splitSource != null ? AssetDatabase.GetAssetPath(m_State.splitSource) : null, m_SplitImage?.Precision ?? SamplePrecision.UNorm8)
+                ? ChannelPacker.AutoFormat(state.splitSource != null ? AssetDatabase.GetAssetPath(state.splitSource) : null, m_SplitImage?.Precision ?? SamplePrecision.UNorm8)
                 : split.format;
             for (int c = 0; c < 4; c++)
             {
@@ -1064,27 +1231,27 @@ namespace DAVFX.TextureChannelPacker
             Label("Folder", "Empty: next to the source");
             split.folder = EditorGUILayout.TextField(split.folder);
             if (GUILayout.Button("...", EditorStyles.miniButton, GUILayout.Width(26)))
-            {
-                string picked = PickFolder(string.IsNullOrEmpty(split.folder) ? "Assets" : split.folder);
-                if (picked != null)
-                {
-                    split.folder = picked;
-                    GUI.changed = true;
-                }
-            }
+                EditorApplication.delayCall += PickSplitFolder;
             EditorGUILayout.EndHorizontal();
+
+            if (m_SplitSettingsError != null)
+                EditorGUILayout.HelpBox(m_SplitSettingsError, MessageType.Error);
         }
 
         void RunSplit()
         {
-            if (m_Disposed || m_State.splitSource == null)
+            m_PackScheduled = false;
+            var state = State;
+            if (m_Disposed || state.splitSource == null)
                 return;
             try
             {
-                var written = ChannelPacker.Split(m_State.splitSource, m_State.split);
+                var written = ChannelPacker.Split(state.splitSource, state.split);
                 var objects = written.Select(AssetDatabase.LoadAssetAtPath<Texture2D>).Where(t => t != null).ToArray();
                 m_LastOutput = objects.FirstOrDefault();
-                m_LastResult = $"Created {written.Count} texture{(written.Count == 1 ? string.Empty : "s")} in {AssetPaths.FolderOf(written.FirstOrDefault())}";
+                m_LastResult = written.Count == 0
+                    ? "Nothing to write"
+                    : $"Created {written.Count} texture{(written.Count == 1 ? string.Empty : "s")} in {AssetPaths.FolderOf(written[0])}";
                 if (objects.Length > 0)
                 {
                     Selection.objects = objects;
@@ -1093,12 +1260,12 @@ namespace DAVFX.TextureChannelPacker
             }
             catch (PackException e)
             {
-                EditorUtility.DisplayDialog("Texture Channel Packer", e.Message, "OK");
+                EditorUtility.DisplayDialog(Title, e.Message, "OK");
             }
             catch (Exception e)
             {
                 Debug.LogException(e);
-                EditorUtility.DisplayDialog("Texture Channel Packer", "Unexpected error: " + e.Message + "\nSee the Console for details.", "OK");
+                EditorUtility.DisplayDialog(Title, "Unexpected error: " + e.Message + "\nSee the Console for details.", "OK");
             }
             MarkDirty();
             m_Repaint?.Invoke();
