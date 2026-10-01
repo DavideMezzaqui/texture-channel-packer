@@ -21,7 +21,10 @@ namespace DAVFX.TextureChannelPacker
     {
         public const string PackageName = "com.davfx.texture-channel-packer";
 
+        // Two columns from this width; back to one column below the lower value. The gap avoids flickering
+        // when a scrollbar appears or disappears near the threshold.
         const float WideLayoutWidth = 820f;
+        const float NarrowLayoutWidth = 760f;
         const int PreviewResolution = 512;
         const string UndoName = "Channel Packer";
         const string Title = "Texture Channel Packer";
@@ -62,6 +65,9 @@ namespace DAVFX.TextureChannelPacker
         Vector2 m_Scroll;
         bool m_OutputExists;
         string m_SplitSettingsError;
+        float m_MeasuredWidth;
+        float m_LayoutWidth;
+        bool m_Wide;
         bool m_RefreshScheduled;
         bool m_PackScheduled;
         bool m_Disposed;
@@ -309,6 +315,12 @@ namespace DAVFX.TextureChannelPacker
             var type = Event.current.type;
             if (type == EventType.Layout)
             {
+                // Width measured in the last repaint (the host may give the view less than the whole window).
+                m_LayoutWidth = m_MeasuredWidth > 0 ? m_MeasuredWidth : EditorGUIUtility.currentViewWidth;
+                if (!m_Wide && m_LayoutWidth >= WideLayoutWidth)
+                    m_Wide = true;
+                else if (m_Wide && m_LayoutWidth < NarrowLayoutWidth)
+                    m_Wide = false;
                 m_OutputExists = SafeFileExists(state.output.AssetPath);
                 m_SplitSettingsError = state.splitSource != null ? ChannelPacker.SplitError(state.splitSource, state.split) : null;
             }
@@ -386,8 +398,18 @@ namespace DAVFX.TextureChannelPacker
             if (preset != null && !string.IsNullOrEmpty(preset.Description))
                 GUILayout.Label(preset.Description, PackerStyles.Info);
 
-            float width = EditorGUIUtility.currentViewWidth;
-            if (width >= WideLayoutWidth)
+            var measure = GUILayoutUtility.GetRect(0, 0, GUILayout.ExpandWidth(true));
+            if (Event.current.type == EventType.Repaint && measure.width > 1)
+            {
+                if (Math.Abs(measure.width - m_MeasuredWidth) > 0.5f)
+                {
+                    m_MeasuredWidth = measure.width;
+                    m_Repaint?.Invoke(); // applied at the next Layout so both passes of a frame match
+                }
+            }
+
+            float width = m_LayoutWidth > 0 ? m_LayoutWidth : EditorGUIUtility.currentViewWidth;
+            if (m_Wide)
             {
                 EditorGUILayout.BeginHorizontal();
                 EditorGUILayout.BeginVertical(GUILayout.Width(width * 0.54f));
@@ -811,7 +833,8 @@ namespace DAVFX.TextureChannelPacker
                 m_PreviewTextureDirty = false;
             }
 
-            float side = Mathf.Min(EditorGUIUtility.currentViewWidth - 40, 340);
+            float available = m_LayoutWidth > 0 ? m_LayoutWidth : EditorGUIUtility.currentViewWidth;
+            float side = Mathf.Max(64, Mathf.Min(available - 40, 340));
             var area = GUILayoutUtility.GetRect(side, side, GUILayout.ExpandWidth(true));
             EditorGUI.DrawRect(area, EditorGUIUtility.isProSkin ? new Color(0.12f, 0.12f, 0.12f) : new Color(0.75f, 0.75f, 0.75f));
             if (m_PreviewImage != null && m_Preview.Texture != null)

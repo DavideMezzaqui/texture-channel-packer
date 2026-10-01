@@ -135,21 +135,21 @@ namespace DAVFX.TextureChannelPacker.Tests
         [Test]
         public void Folders_AndNames_ThatUnityIgnoresOrThatEscapeAssets_AreErrors()
         {
-            foreach (string folder in new[] { "Assets/../Outside", "Assets/./X", "Assets/.hidden", "Assets/Backup~", "Assets//X", "Assets/ X", "C:/Temp", "Assets/a|b" })
+            foreach (string folder in new[] { "Assets/../Outside", "Assets/./X", "Assets/.hidden", "Assets/Backup~", "Assets//X", "Assets/ X", "C:/Temp", "Assets/a|b", "Assets/CON", "Assets/Prn/X" })
             {
                 var output = Output();
                 output.folder = folder;
                 var plan = PackValidator.Validate(MaskMap(), new[] { Info(8, 8), null, null, null }, new SizeSettings(), output);
                 Assert.IsTrue(plan.HasErrors, "folder " + folder);
             }
-            foreach (string name in new[] { ".png", ".hidden", "Mask~", "Mask.", " Mask", "a/b", "a*b" })
+            foreach (string name in new[] { ".png", ".hidden", "Mask~", "Mask.", " Mask", "a/b", "a*b", "CON", "nul", "Com1", "LPT9.png", "aux.v2" })
             {
                 var output = Output();
                 output.fileName = name;
                 var plan = PackValidator.Validate(MaskMap(), new[] { Info(8, 8), null, null, null }, new SizeSettings(), output);
                 Assert.IsTrue(plan.HasErrors, "name " + name);
             }
-            foreach (string folder in new[] { "", "Assets", "Assets/", "Assets\\Textures\\Rock", "Assets/My Textures/v1.2" })
+            foreach (string folder in new[] { "", "Assets", "Assets/", "Assets\\Textures\\Rock", "Assets/My Textures/v1.2", "Assets/Console", "Assets/COM10" })
             {
                 var output = Output();
                 output.folder = folder;
@@ -211,6 +211,13 @@ namespace DAVFX.TextureChannelPacker.Tests
             Assert.AreEqual("T_Rock", NamingUtility.BaseName(new[] { "T_Rock_Metallic", "T_Rock_AO", "T_Rock_Roughness" }));
             Assert.AreEqual("Rock", NamingUtility.BaseName(new[] { "Rock_Metal", "Rock_Mask" }));
             Assert.AreEqual("T_Brick_01", NamingUtility.BaseName(new[] { "T_Brick_01_N" }));
+            Assert.AreEqual("T_Wall", NamingUtility.BaseName(new[] { "T_Wall_N_4K" }));
+            Assert.AreEqual("T_Wall_Moss", NamingUtility.BaseName(new[] { "T_Wall_Moss" }), "no map keyword at the end: unchanged");
+            Assert.AreEqual("T_Erosion_01", NamingUtility.BaseName(new[] { "T_Erosion_01" }), "variant numbers are kept");
+            Assert.AreEqual("T_Wall", NamingUtility.BaseName(new[] { "T_Wall_N_GL" }), "the normal convention is not part of the new name");
+            Assert.AreEqual("Wall", NamingUtility.BaseName(new[] { "Wall_4K" }));
+            Assert.AreEqual("4K", NamingUtility.BaseName(new[] { "4K" }), "never reduced to nothing");
+            Assert.AreEqual("T_Rock", NamingUtility.BaseName(new[] { "T_Rock_AO_2K", "T_Rock_Roughness_2K" }));
             Assert.AreEqual("Noise", NamingUtility.BaseName(new[] { "Noise" }));
             Assert.AreEqual("NewTexture", NamingUtility.BaseName(new string[0]));
         }

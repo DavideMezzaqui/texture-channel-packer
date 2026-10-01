@@ -54,13 +54,22 @@ namespace DAVFX.TextureChannelPacker
             string result;
             if (list.Count == 1)
             {
+                // Drop trailing resolution/convention tokens, then one map keyword: "T_Wall_N_4K" gives "T_Wall".
                 result = list[0];
-                int cut = result.LastIndexOfAny(s_Separators);
-                if (cut > 0)
+                bool keywordRemoved = false;
+                while (true)
                 {
+                    int cut = result.LastIndexOfAny(s_Separators);
+                    if (cut <= 0)
+                        break;
                     string last = result.Substring(cut + 1).ToLowerInvariant();
-                    if (PackPresets.AllKeywords.Contains(last))
-                        result = result.Substring(0, cut);
+                    if (!keywordRemoved && PackPresets.AllKeywords.Contains(last))
+                        keywordRemoved = true;
+                    else if (!s_NamingNoiseToken.IsMatch(last))
+                        break;
+                    result = result.Substring(0, cut);
+                    if (keywordRemoved)
+                        break;
                 }
             }
             else
@@ -148,6 +157,9 @@ namespace DAVFX.TextureChannelPacker
             int strong = FindStrong(names, keywords, taken);
             return strong >= 0 ? strong : FindWeak(names, keywords, taken);
         }
+
+        /// <summary>Trailing tokens dropped from output names: resolution and normal convention, never variant numbers.</summary>
+        static readonly Regex s_NamingNoiseToken = new Regex(@"^(\d+k|dx|gl|ogl|directx|opengl)$", RegexOptions.CultureInvariant);
 
         /// <summary>Trailing tokens that describe the file, not the map: resolution, version, normal convention...</summary>
         static readonly Regex s_NoiseToken = new Regex(@"^(\d+k?|\d+x\d+|v\d+|dx|gl|ogl|directx|opengl|final|lod\d*|tex|texture|map)$", RegexOptions.CultureInvariant);

@@ -162,7 +162,12 @@ namespace DAVFX.TextureChannelPacker
                     texture = AssetDatabase.LoadAssetAtPath<Texture2D>(tempPath);
                     problem = Verify(texture, probe, expectedFormat) ?? VerifyImporter(importer);
                     if (problem != null)
-                        throw new PackException($"Lossless read failed ({problem}). A project AssetPostprocessor or preset may be overriding texture import settings.");
+                    {
+                        int cap = EditorUserBuildSettings.overrideMaxTextureSize;
+                        if (cap > 0 && probe.HasSize && Math.Max(probe.Width, probe.Height) > cap)
+                            throw new PackException($"Lossless read failed ({problem}): Build Settings > Asset Import Overrides > Max Texture Size is set to {cap} and caps every import. Set it to 'No Override' to read this file at full size.");
+                        throw new PackException($"Lossless read failed ({problem}). A project AssetPostprocessor, a default Preset or the Build Settings Asset Import Overrides may be changing texture import settings.");
+                    }
                     s_MetaTemplates[templateKey] = File.ReadAllText(tempFull + ".meta");
                 }
 

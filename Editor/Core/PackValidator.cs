@@ -217,9 +217,22 @@ namespace DAVFX.TextureChannelPacker
                 return "Output file name is empty.";
             if (fileName.IndexOfAny(s_InvalidNameChars) >= 0 || fileName.Trim() != fileName || fileName.EndsWith("."))
                 return "Output file name contains invalid characters, or starts or ends with a space or a dot.";
-            if (IsIgnoredByUnity(new OutputSettings { fileName = fileName }.CleanFileName))
+            string clean = new OutputSettings { fileName = fileName }.CleanFileName;
+            if (IsIgnoredByUnity(clean))
                 return "Unity ignores files whose name starts with '.' or ends with '~': pick another name.";
+            if (IsReservedOnWindows(clean))
+                return $"'{clean}' is a reserved name on Windows: pick another name.";
             return null;
+        }
+
+        /// <summary>CON, PRN, AUX, NUL, COM1-9 and LPT1-9 cannot be file or folder names on Windows, with any extension.</summary>
+        static bool IsReservedOnWindows(string name)
+        {
+            int dot = name.IndexOf('.');
+            string stem = (dot >= 0 ? name.Substring(0, dot) : name).TrimEnd().ToUpperInvariant();
+            if (stem == "CON" || stem == "PRN" || stem == "AUX" || stem == "NUL")
+                return true;
+            return stem.Length == 4 && (stem.StartsWith("COM") || stem.StartsWith("LPT")) && stem[3] >= '1' && stem[3] <= '9';
         }
 
         /// <summary>Why an output folder cannot be used, or null when it is fine. Empty means Assets.</summary>
@@ -236,6 +249,8 @@ namespace DAVFX.TextureChannelPacker
             {
                 if (segment.Length == 0 || IsIgnoredByUnity(segment) || segment.Trim() != segment)
                     return $"Output folder segment '{segment}' is empty, has extra spaces, or is ignored by Unity (starts with '.' or ends with '~').";
+                if (IsReservedOnWindows(segment))
+                    return $"Output folder segment '{segment}' is a reserved name on Windows.";
             }
             return null;
         }
