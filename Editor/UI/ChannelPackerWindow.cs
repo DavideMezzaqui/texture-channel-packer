@@ -34,6 +34,7 @@ namespace DAVFX.TextureChannelPacker
             if (m_State == null)
                 m_State = new PackerState();
             m_View = new ChannelPackerView(() => m_State, this, Repaint);
+            wantsMouseMove = true; // live pixel readout in the preview
             Undo.undoRedoPerformed += OnUndoRedo;
         }
 

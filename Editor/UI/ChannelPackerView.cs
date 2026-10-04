@@ -56,6 +56,7 @@ namespace DAVFX.TextureChannelPacker
         string m_PreviewError;
         bool m_PreviewTextureDirty;
         PreviewMode m_BuiltMode;
+        bool m_ReadoutShown;
 
         PixelImage m_SplitImage;
         string m_SplitError;
@@ -815,14 +816,14 @@ namespace DAVFX.TextureChannelPacker
             PreviewMode[] modes;
             if (gray)
             {
-                names = alpha ? new[] { "L", "A" } : new[] { "L" };
-                modes = alpha ? new[] { PreviewMode.Color, PreviewMode.Alpha } : new[] { PreviewMode.Color };
+                names = alpha ? new[] { "LA", "L", "A" } : new[] { "L" };
+                modes = alpha ? new[] { PreviewMode.Composite, PreviewMode.Color, PreviewMode.Alpha } : new[] { PreviewMode.Color };
             }
             else
             {
-                names = alpha ? new[] { "RGB", "R", "G", "B", "A" } : new[] { "RGB", "R", "G", "B" };
+                names = alpha ? new[] { "RGBA", "RGB", "R", "G", "B", "A" } : new[] { "RGB", "R", "G", "B" };
                 modes = alpha
-                    ? new[] { PreviewMode.Color, PreviewMode.Red, PreviewMode.Green, PreviewMode.Blue, PreviewMode.Alpha }
+                    ? new[] { PreviewMode.Composite, PreviewMode.Color, PreviewMode.Red, PreviewMode.Green, PreviewMode.Blue, PreviewMode.Alpha }
                     : new[] { PreviewMode.Color, PreviewMode.Red, PreviewMode.Green, PreviewMode.Blue };
             }
             int current = Array.IndexOf(modes, (PreviewMode)state.previewMode);
@@ -832,7 +833,7 @@ namespace DAVFX.TextureChannelPacker
             EditorGUILayout.BeginHorizontal();
             GUILayout.Label("Preview", PackerStyles.Section);
             GUILayout.FlexibleSpace();
-            int selected = GUILayout.Toolbar(current, names, EditorStyles.miniButton, GUILayout.Width(names.Length * 34));
+            int selected = GUILayout.Toolbar(current, names, EditorStyles.miniButton, GUILayout.Width(names.Length * 38));
             EditorGUILayout.EndHorizontal();
             Separator();
             var mode = modes[Mathf.Clamp(selected, 0, modes.Length - 1)];
@@ -849,23 +850,84 @@ namespace DAVFX.TextureChannelPacker
             float side = Mathf.Max(64, Mathf.Min(available - 40, 340));
             var area = GUILayoutUtility.GetRect(side, side, GUILayout.ExpandWidth(true));
             EditorGUI.DrawRect(area, EditorGUIUtility.isProSkin ? new Color(0.12f, 0.12f, 0.12f) : new Color(0.75f, 0.75f, 0.75f));
+            string readout = "Hover the preview to read the output values.";
             if (m_PreviewImage != null && m_Preview.Texture != null)
             {
                 var fit = Fit(area, m_PreviewImage.Width, m_PreviewImage.Height);
                 EditorGUI.DrawPreviewTexture(fit, m_Preview.Texture);
+                var e = Event.current;
+                bool hover = fit.Contains(e.mousePosition);
+                if (hover)
+                    readout = Readout(fit, e.mousePosition, layout);
+                // Repaint while the mouse moves over the preview, and once more when it leaves.
+                if (e.type == EventType.MouseMove && (hover || m_ReadoutShown))
+                    m_Repaint?.Invoke();
+                if (e.type == EventType.Repaint)
+                    m_ReadoutShown = hover;
             }
             else
             {
                 string message = m_PreviewError ?? "Add a texture or set a constant to see the result.";
                 GUI.Label(area, message, PackerStyles.CenteredInfo);
             }
+            // Fixed height and no wrapping: the text changes with the mouse, the layout must not.
+            var readoutRect = GUILayoutUtility.GetRect(GUIContent.none, s_ReadoutStyle, GUILayout.ExpandWidth(true));
+            GUI.Label(readoutRect, readout, s_ReadoutStyle);
 
             if (m_Plan != null && m_Plan.Width > 0)
             {
                 string depth = OutputSettings.DepthName(m_Plan.ResolvedDepth);
                 GUILayout.Label($"Output {m_Plan.Width} x {m_Plan.Height}  ·  {state.output.format} {depth}  ·  {s_LayoutNames[(int)layout]}", PackerStyles.Info);
             }
-            GUILayout.Label("The preview is downscaled for speed. Pack always works at full resolution.", PackerStyles.Info);
+            GUILayout.Label("The preview is downscaled for speed: values are read from it. Pack always works at full resolution.", PackerStyles.Info);
+        }
+
+        static GUIStyle s_ReadoutStyleCache;
+
+        static GUIStyle s_ReadoutStyle => s_ReadoutStyleCache ?? (s_ReadoutStyleCache = new GUIStyle(PackerStyles.Info)
+        {
+            wordWrap = false,
+            clipping = TextClipping.Clip,
+            fixedHeight = EditorGUIUtility.singleLineHeight
+        });
+
+        /// <summary>Values of the preview pixel under the mouse, with its position in the full size output.</summary>
+        string Readout(Rect fit, Vector2 mouse, OutputLayout layout)
+        {
+            var image = m_PreviewImage;
+            int px = Mathf.Clamp((int)((mouse.x - fit.x) / fit.width * image.Width), 0, image.Width - 1);
+            int py = Mathf.Clamp((int)((mouse.y - fit.y) / fit.height * image.Height), 0, image.Height - 1);
+            int i = py * image.Width + px;
+            int ox = px, oy = py;
+            if (m_Plan != null && m_Plan.Width > 0)
+            {
+                ox = px * m_Plan.Width / image.Width;
+                oy = py * m_Plan.Height / image.Height;
+            }
+
+            var text = new System.Text.StringBuilder();
+            text.Append("Pixel ").Append(ox).Append(", ").Append(oy).Append("   ");
+            if (PackRecipe.IsGray(layout))
+            {
+                AppendValue(text, "L", image.R[i]);
+            }
+            else
+            {
+                AppendValue(text, "R", image.R[i]);
+                AppendValue(text, "G", image.G[i]);
+                AppendValue(text, "B", image.B[i]);
+            }
+            if (PackRecipe.HasAlpha(layout))
+                AppendValue(text, "A", image.A != null ? image.A[i] : 1f);
+            return text.ToString();
+        }
+
+        static void AppendValue(System.Text.StringBuilder text, string channel, float value)
+        {
+            text.Append(channel).Append(' ').Append(value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
+            if (value >= 0f && value <= 1f)
+                text.Append(" (").Append(ColorMath.Quantize(value, 255)).Append(')');
+            text.Append("   ");
         }
 
         static Rect Fit(Rect area, int width, int height)

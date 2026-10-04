@@ -30,7 +30,7 @@ Open the tool from **Tools > DAVFX > Texture Channel Packer**, or right click te
 
 1. Pick a preset in the toolbar (for example **Unity > HDRP Mask Map**).
 2. Select your textures in the Project window and click **Use Selection**. They are matched to the slots by name (`_Metallic`, `_AO`, `_Roughness`...). You can also drag them into the slots.
-3. Check the preview and the messages under the settings.
+3. Check the preview (RGBA over a checkerboard, single channels, values under the mouse) and the messages under the settings.
 4. Click **Pack**. The file is saved next to the first input, named after the texture set plus the preset suffix (`T_Rock_MaskMap.png`).
 
 ## What you can do

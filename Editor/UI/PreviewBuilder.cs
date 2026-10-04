@@ -8,7 +8,9 @@ namespace DAVFX.TextureChannelPacker
         Red = 1,
         Green = 2,
         Blue = 3,
-        Alpha = 4
+        Alpha = 4,
+        /// <summary>Color over a checkerboard, so transparency is visible.</summary>
+        Composite = 5
     }
 
     /// <summary>Turns an evaluated (downscaled) image into a texture for display. Display only, never saved.</summary>
@@ -59,6 +61,15 @@ namespace DAVFX.TextureChannelPacker
                         case PreviewMode.Alpha:
                             r = g = b = image.A != null ? Q(image.A[i]) : (byte)255;
                             break;
+                        case PreviewMode.Composite:
+                        {
+                            float a = image.A != null ? Saturate(image.A[i]) : 1f;
+                            float check = ((x / CheckerSize + y / CheckerSize) & 1) == 0 ? 0.8f : 0.55f;
+                            r = Q(Saturate(image.R[i]) * a + check * (1f - a));
+                            g = Q(Saturate(image.G[i]) * a + check * (1f - a));
+                            b = Q(Saturate(image.B[i]) * a + check * (1f - a));
+                            break;
+                        }
                         default:
                             r = Q(image.R[i]);
                             g = Q(image.G[i]);
@@ -70,6 +81,13 @@ namespace DAVFX.TextureChannelPacker
             }
             m_Texture.SetPixels32(m_Pixels);
             m_Texture.Apply(false, false);
+        }
+
+        const int CheckerSize = 8;
+
+        static float Saturate(float v)
+        {
+            return v > 0f ? (v < 1f ? v : 1f) : 0f; // NaN reads as 0
         }
 
         static byte Q(float v)

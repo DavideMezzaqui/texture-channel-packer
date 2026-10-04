@@ -7,6 +7,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Added
 - Built-in OpenEXR reader: single part scanline files with half or float channels and NONE, RLE, ZIPS, ZIP or PIZ compression are read bit for bit, without a temporary import (faster, no AssetDatabase activity). Other variants still go through Unity's importer, and when both fail the error says why.
+- Preview: RGBA (or LA) view over a checkerboard, so transparency is visible, and a live readout of the output values (0-1 and 0-255) under the mouse.
 - Reference check against the OpenEXR library on more than 300 EXR files, embedded OpenEXR samples for the Unity tests, EXR fuzzing.
 
 ### Changed
