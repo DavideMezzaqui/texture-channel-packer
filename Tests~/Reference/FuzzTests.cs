@@ -21,6 +21,10 @@ namespace DAVFX.TextureChannelPacker.Tests
             yield return ("tgaRle", TgaCodec.Encode(TestImages.Constant(40, 4, 0.1f, 0.2f, 0.3f), OutputLayout.RGB, true), ".tga");
             yield return ("tgaGray", TgaCodec.Encode(TestImages.GrayNoise(6, 6, 5), OutputLayout.Grayscale, true), ".tga");
             yield return ("exr", ExrWriter.Encode(TestImages.Noise(8, 20, 8, false, true, 6), OutputLayout.RGBA, false), ".exr");
+            foreach (var (compression, base64) in ExrSamples.Rgba)
+                yield return ("exr" + compression, ExrSamples.Bytes(base64), ".exr");
+            foreach (var (compression, base64) in ExrSamples.GrayFloat)
+                yield return ("exrGray" + compression, ExrSamples.Bytes(base64), ".exr");
         }
 
         static void Check(byte[] data, string ext, string label)

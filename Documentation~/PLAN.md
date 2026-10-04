@@ -32,7 +32,8 @@ Il risultato si porta dietro tutti questi artefatti. Questo tool invece legge **
 | PNG (1/2/4/8/16 bit, gray, palette, RGB, RGBA, interlacciato) | decoder interno | bit per bit |
 | TGA (8/16/24/32 bit, RLE, palette, qualsiasi origine) | decoder interno | bit per bit |
 | JPG | `ImageConversion.LoadImage` | identico al file (che è già lossy di suo, viene segnalato) |
-| EXR, HDR, PSD, TIF, BMP, GIF, IFF, PICT | copia temporanea importata **non compressa, a piena risoluzione, readable, lineare**, letta e poi cancellata | bit per bit (float 32 per sorgenti oltre 8 bit) |
+| EXR scanline (half/float; NONE, RLE, ZIPS, ZIP, PIZ) | decoder interno | bit per bit |
+| HDR, PSD, TIF, BMP, GIF, IFF, PICT, EXR tiled/multipart/lossy | copia temporanea importata **non compressa, a piena risoluzione, readable, lineare**, letta e poi cancellata | bit per bit (float 32 per sorgenti oltre 8 bit) |
 | Texture2D non legata a un file (.asset) | lettura diretta se readable e non compressa, altrimenti readback GPU | esatto se non compressa, segnalato se compressa |
 
 Garanzie:
@@ -115,7 +116,7 @@ com.davfx.texture-channel-packer/
       PackSettings             dimensione, formato, bit depth, import
       PackValidator            errori e avvisi prima del Pack
       Presets, NamingUtility
-      Codecs/                  PNG (decode+encode), TGA (decode+encode), EXR (encode), Zlib, CRC, probe header
+      Codecs/                  PNG (decode+encode), TGA (decode+encode), EXR (decode+encode), Zlib, CRC, probe header
     Unity/                     ponte con l'AssetDatabase
       TextureSourceLoader      lettura lossless (vedi sezione 2)
       DecodeCache              cache LRU con budget di memoria
@@ -178,7 +179,7 @@ Ogni caso ha un test automatico. "Esatto" significa confronto bit per bit, nessu
 | U18 | sRGB → Lineare → sRGB in float | errore < 1e-6 | core |
 | U19 | TGA RLE e non compresso, origine alto/basso | esatto | core + Unity |
 | U20 | Sorgente importata da Unity compressa e a 2048 | il tool legge comunque i dati originali a piena risoluzione | Unity |
-| U21 | EXR letto via importer temporaneo | float identici, nessun file temporaneo residuo | Unity |
+| U21 | EXR letto dal decoder interno e via importer temporaneo | float identici nei due casi, nessun file temporaneo residuo | core + Unity |
 | U22 | Sovrascrittura | backup creato, .meta originale conservato | Unity |
 | U23 | Max Size output | >= risoluzione reale | Unity |
 | U24 | Decoder PNG su 20 varianti generate da Pillow | identico a Pillow | harness |

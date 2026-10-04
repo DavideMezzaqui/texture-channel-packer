@@ -86,7 +86,8 @@ Empty slots in the material presets fall back to Unity's defaults (Metallic 0, O
 | PNG (1 to 16-bit, gray, palette, RGB, RGBA, interlaced, tRNS) | built-in decoder, exact |
 | TGA (8/16/24/32-bit, RLE, palette, any origin) | built-in decoder, exact |
 | JPG | Unity's decoder (the file is lossy by nature, the tool says so) |
-| EXR, HDR, PSD, TIFF, BMP, GIF and others | a temporary copy is imported uncompressed, full size, readable and linear, read, verified and deleted |
+| EXR (single part scanline, half/float, NONE, RLE, ZIPS, ZIP or PIZ) | built-in decoder, values bit for bit, no import |
+| HDR, PSD, TIFF, BMP, GIF, other EXR variants (tiled, multi-part, lossy compressions) | a temporary copy is imported uncompressed, full size, readable and linear, read, verified and deleted |
 
 - The source file and its .meta are never modified while reading.
 - After a temporary import the tool checks format, size, mip count and (Unity 2022.1+) channel swizzle. If something in the project (an AssetPostprocessor, a default Preset, the Build Settings Asset Import Overrides) changed them, you get an error that says why, instead of a silently degraded result. A failed read is retried when you assign the texture again, or after 30 seconds.
@@ -136,7 +137,7 @@ dotnet test Tests~/CoreTests/CoreTests.csproj
 python3 Tests~/Reference/reference_check.py    # pip install pillow numpy pypng OpenEXR
 ```
 
-The reference check compares the decoders and encoders with pypng, Pillow and the official OpenEXR library on more than 280 files.
+The reference check compares the decoders and encoders with pypng, Pillow and the official OpenEXR library on more than 600 files, including every lossless EXR compression with NaN, infinities and subnormal values.
 
 **Unity API compatibility** (downloads only the managed assemblies of each editor, needs curl, xz and the .NET 8 SDK):
 

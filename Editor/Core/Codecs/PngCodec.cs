@@ -44,7 +44,7 @@ namespace DAVFX.TextureChannelPacker.Codecs
             }
             catch (AggregateException e) when (e.InnerException is PackException inner)
             {
-                throw new PackException(inner.Message, inner);
+                throw inner.Wrap();
             }
             catch (Exception e) when (!(e is PackException) && !(e is OutOfMemoryException))
             {

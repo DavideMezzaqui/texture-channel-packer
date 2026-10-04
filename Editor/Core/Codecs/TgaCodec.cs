@@ -24,7 +24,7 @@ namespace DAVFX.TextureChannelPacker.Codecs
             }
             catch (AggregateException e) when (e.InnerException is PackException inner)
             {
-                throw new PackException(inner.Message, inner);
+                throw inner.Wrap();
             }
             catch (Exception e) when (!(e is PackException) && !(e is OutOfMemoryException))
             {
@@ -49,7 +49,7 @@ namespace DAVFX.TextureChannelPacker.Codecs
             int baseType = imageType & 7;
             bool rle = (imageType & 8) != 0;
             if (baseType != 1 && baseType != 2 && baseType != 3)
-                throw new PackException($"Unsupported TGA image type {imageType}.");
+                throw PackException.Unsupported($"Unsupported TGA image type {imageType}.");
             if (width <= 0 || height <= 0)
                 throw new PackException($"Invalid TGA size {width}x{height}.");
             PngCodec.CheckSize("TGA", width, height);
@@ -94,7 +94,7 @@ namespace DAVFX.TextureChannelPacker.Codecs
                 default: depthValid = depth == 8 || depth == 16; break;
             }
             if (!depthValid)
-                throw new PackException($"Unsupported TGA pixel depth {depth} for image type {imageType}.");
+                throw PackException.Unsupported($"Unsupported TGA pixel depth {depth} for image type {imageType}.");
             int pixelBytes = (depth + 7) / 8;
 
             int count = width * height;
@@ -220,7 +220,7 @@ namespace DAVFX.TextureChannelPacker.Codecs
                     hasAlpha = true;
                     return;
                 default:
-                    throw new PackException($"Unsupported TGA color depth {bits}.");
+                    throw PackException.Unsupported($"Unsupported TGA color depth {bits}.");
             }
         }
 

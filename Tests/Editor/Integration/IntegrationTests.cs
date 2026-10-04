@@ -94,7 +94,22 @@ namespace DAVFX.TextureChannelPacker.Tests
         }
 
         [Test]
-        public void U21_Exr_ThroughTemporaryImport_IsBitExact_AndLeavesNoTrace([Values(true, false)] bool useFloat)
+        public void U21_Exr_NativeAndThroughTemporaryImport_AreBitExact_AndLeaveNoTrace(
+            [Values(true, false)] bool useFloat, [Values(true, false)] bool native)
+        {
+            // Native: the built-in reader. Otherwise Unity's importer, which must return the same values.
+            TextureSourceLoader.UseNativeExr = native;
+            try
+            {
+                RunU21(useFloat);
+            }
+            finally
+            {
+                TextureSourceLoader.UseNativeExr = true;
+            }
+        }
+
+        void RunU21(bool useFloat)
         {
             var random = new System.Random(3);
             int w = 70, h = 33, n = w * h;

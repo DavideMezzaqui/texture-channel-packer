@@ -59,6 +59,56 @@ namespace DAVFX.TextureChannelPacker.Tests
         }
 
         [Test]
+        public void DecodeExrFixtures_MatchOpenExrExactly()
+        {
+            string folder = Folder("CP_FIXTURES");
+            int decoded = 0, rejected = 0;
+            foreach (string file in Directory.GetFiles(folder, "*.exr"))
+            {
+                string name = Path.GetFileName(file);
+                byte[] bytes = File.ReadAllBytes(file);
+                if (File.Exists(Path.ChangeExtension(file, ".exrunsupported")))
+                {
+                    var error = Assert.Throws<PackException>(() => ImageEncoder.TryDecode(bytes, ".exr"), name);
+                    Assert.IsTrue(error.IsUnsupported, $"{name}: should be reported as unsupported, got: {error.Message}");
+                    rejected++;
+                    continue;
+                }
+
+                var image = ImageEncoder.TryDecode(bytes, ".exr");
+                Assert.IsNotNull(image, name);
+                using (var reader = new BinaryReader(File.OpenRead(Path.ChangeExtension(file, ".exrexpected"))))
+                {
+                    int w = reader.ReadInt32();
+                    int h = reader.ReadInt32();
+                    int flags = reader.ReadInt32();
+                    var precision = (SamplePrecision)reader.ReadInt32();
+                    Assert.AreEqual(w, image.Width, name);
+                    Assert.AreEqual(h, image.Height, name);
+                    Assert.AreEqual((flags & 1) != 0, image.HasAlpha, name + " alpha");
+                    Assert.AreEqual((flags & 2) != 0, image.IsGrayscale, name + " grayscale");
+                    Assert.AreEqual(precision, image.Precision, name + " precision");
+                    int planes = image.HasAlpha ? 4 : 3;
+                    for (int c = 0; c < planes; c++)
+                    {
+                        var plane = image.GetPlane(c);
+                        for (int i = 0; i < w * h; i++)
+                        {
+                            uint expected = reader.ReadUInt32();
+                            uint actual = HalfConverter.SingleToBits(plane[i]);
+                            if (expected != actual)
+                                Assert.Fail($"{name} pixel {i} channel {c}: expected 0x{expected:X8}, got 0x{actual:X8}");
+                        }
+                    }
+                }
+                decoded++;
+            }
+            Assert.Greater(decoded, 200);
+            Assert.Greater(rejected, 10);
+            TestContext.WriteLine($"Decoded {decoded} OpenEXR files bit-exactly, rejected {rejected} unsupported variants as expected.");
+        }
+
+        [Test]
         public void EncodeOutputs_ForExternalVerification()
         {
             string folder = Folder("CP_OUTPUTS");

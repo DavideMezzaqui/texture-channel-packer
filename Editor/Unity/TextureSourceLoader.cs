@@ -81,7 +81,7 @@ namespace DAVFX.TextureChannelPacker
             PackException nativeError = null;
             try
             {
-                var native = ImageEncoder.TryDecode(bytes, ext);
+                var native = ImageEncoder.TryDecode(bytes, ext, UseNativeExr);
                 if (native != null)
                     return native;
                 if (jpeg)
@@ -98,11 +98,18 @@ namespace DAVFX.TextureChannelPacker
                 image.IsLossySource |= jpeg;
                 return image;
             }
-            catch (PackException) when (nativeError != null)
+            catch (PackException importerError) when (nativeError != null)
             {
+                // Damaged file: the built-in decoder's message is the precise one.
+                // Valid variant it does not implement: say so, then why the importer failed too.
+                if (nativeError.IsUnsupported)
+                    throw new PackException($"{nativeError.Message} Unity's importer could not read it either: {importerError.Message}", importerError);
                 throw nativeError;
             }
         }
+
+        /// <summary>Test hook: when false, OpenEXR files are read through Unity's importer like formats without a built-in decoder.</summary>
+        internal static bool UseNativeExr { get; set; } = true;
 
         // ------------------------------------------------------------------ JPEG
 

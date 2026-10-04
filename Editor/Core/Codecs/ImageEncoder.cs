@@ -16,11 +16,17 @@ namespace DAVFX.TextureChannelPacker.Codecs
             }
         }
 
-        /// <summary>Decodes formats the tool reads natively. Returns null for anything else.</summary>
-        public static PixelImage TryDecode(byte[] data, string extension)
+        /// <summary>
+        /// Decodes formats the tool reads natively (PNG, TGA, OpenEXR). Returns null for anything else.
+        /// Throws a <see cref="PackException"/> for damaged files, flagged <see cref="PackException.IsUnsupported"/>
+        /// for valid variants the built-in decoders do not implement.
+        /// </summary>
+        public static PixelImage TryDecode(byte[] data, string extension, bool allowExr = true)
         {
             if (PngCodec.IsPng(data))
                 return PngCodec.Decode(data);
+            if (allowExr && ExrReader.IsExr(data))
+                return ExrReader.Decode(data);
             if (extension != null && extension.ToLowerInvariant() == ".tga")
                 return TgaCodec.Decode(data);
             return null;

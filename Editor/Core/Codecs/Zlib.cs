@@ -32,6 +32,16 @@ namespace DAVFX.TextureChannelPacker.Codecs
         /// <summary>Inflates a zlib stream into exactly <paramref name="expectedLength"/> bytes.</summary>
         public static byte[] Decompress(byte[] data, int offset, int count, int expectedLength)
         {
+            var result = new byte[expectedLength];
+            Decompress(data, offset, count, result, expectedLength);
+            return result;
+        }
+
+        /// <summary>Inflates a zlib stream into the first <paramref name="expectedLength"/> bytes of <paramref name="result"/>.</summary>
+        public static void Decompress(byte[] data, int offset, int count, byte[] result, int expectedLength)
+        {
+            if (result == null || result.Length < expectedLength)
+                throw new ArgumentException("The output buffer is too small.", nameof(result));
             if (count < 2)
                 throw new PackException("Compressed data is truncated.");
             int cmf = data[offset];
@@ -41,7 +51,6 @@ namespace DAVFX.TextureChannelPacker.Codecs
             if ((flg & 0x20) != 0)
                 throw new PackException("zlib preset dictionaries are not supported.");
 
-            var result = new byte[expectedLength];
             int read = 0;
             try
             {
@@ -63,7 +72,6 @@ namespace DAVFX.TextureChannelPacker.Codecs
             }
             if (read != expectedLength)
                 throw new PackException($"Compressed data is truncated ({read} of {expectedLength} bytes).");
-            return result;
         }
 
         public static uint Adler32(byte[] data, int offset, int count)
