@@ -19,10 +19,10 @@ Git must be installed on your machine.
 3. Paste:
 
 ```
-https://github.com/DavideMezzaqui/Claude-Test-1.git?path=/com.davfx.texture-channel-packer
+https://github.com/DavideMezzaqui/texture-channel-packer.git
 ```
 
-To lock a version, add a branch, tag or commit at the end: `...?path=/com.davfx.texture-channel-packer#v1.0.0`.
+To lock a version, add a branch, tag or commit at the end: `...texture-channel-packer.git#v1.0.0`.
 
 Open the tool from **Tools > DAVFX > Texture Channel Packer**, or right click textures in the Project window > **DAVFX Channel Packer**.
 
