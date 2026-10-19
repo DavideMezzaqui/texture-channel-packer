@@ -1,0 +1,37 @@
+# Creates the tag and the GitHub release for the version in package.json, the first time that version reaches main.
+# Bump "version" in package.json and add its section to CHANGELOG.md: the tag vX.Y.Z follows automatically.
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: [package.json]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag and release the package version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(jq -r .version package.json)
+          tag="v$version"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" > /dev/null; then
+            echo "$tag already exists, nothing to do."
+            exit 0
+          fi
+          # Release notes: the CHANGELOG section of this version, without its heading.
+          awk -v v="$version" '
+            index($0, "## [" v "]") == 1 { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "See CHANGELOG.md." > notes.md
+          gh release create "$tag" --target "$GITHUB_SHA" --title "$version" --notes-file notes.md
