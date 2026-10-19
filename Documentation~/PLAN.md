@@ -65,7 +65,7 @@ Garanzie:
 - **Formato**: PNG (8/16 bit), TGA (8 bit, RLE opzionale), EXR (half/float). Bit depth "Auto" sceglie la minima che non perde dati.
 - **Output**: cartella + nome (nome automatico da prefisso comune + suffisso del preset), sovrascrittura con conferma e backup automatico in `Library/DAVFX_ChannelPacker/Backups`.
 - **Import settings dell'output**: impostazioni del preset (sRGB o lineare, tipo, compressione), copia da un input, oppure default Unity.
-- **Preview** in tempo reale (RGB, R, G, B, A) calcolata con lo stesso motore del Pack.
+- **Preview** in tempo reale (RGBA su scacchiera, RGB, R, G, B, A) calcolata con lo stesso motore del Pack, con lettura dei valori sotto il mouse.
 - **Auto-assign**: seleziona più texture nel Project e il tool le assegna agli slot in base al nome (`_AO`, `_Metallic`, `_Roughness`, ...).
 
 ### 3.2 Modalità Split
@@ -104,7 +104,7 @@ Creano sempre un file nuovo accanto all'originale (mai sovrascrittura silenziosa
 ## 4. Architettura
 
 ```
-com.davfx.texture-channel-packer/
+(radice del repository = radice del pacchetto)
   package.json, README.md, CHANGELOG.md, LICENSE.md
   Editor/                      assembly DAVFX.TextureChannelPacker.Editor (solo Editor)
     Core/                      C# puro, nessuna dipendenza da Unity, testabile ovunque
@@ -130,7 +130,10 @@ com.davfx.texture-channel-packer/
   Tests/Editor/                test EditMode (Unity Test Framework)
     Core/                      test del core (girano anche fuori da Unity)
     Integration/               test end-to-end con AssetDatabase reale
-  Tests~/DotNet/               harness .NET + verifica con librerie di riferimento (ignorato da Unity)
+  Tests~/                      ignorato da Unity
+    CoreTests/                 harness .NET dei test del core
+    Reference/                 verifica con pypng, Pillow e OpenEXR, fuzzing
+    UnityCompileCheck/         compilazione contro le DLL reali di più versioni di Unity
 ```
 
 Scelte motivate:
@@ -185,7 +188,7 @@ Ogni caso ha un test automatico. "Esatto" significa confronto bit per bit, nessu
 | U24 | Decoder PNG su 20 varianti generate da Pillow | identico a Pillow | harness |
 | U25 | Encoder PNG/TGA letti da Pillow | identici | harness |
 | U26 | Encoder EXR letto da OpenEXR ufficiale | identico | harness |
-| U27 | File corrotti e troncati (oltre 100.000 varianti) | solo errori chiari, mai eccezioni grezze o blocchi | harness |
+| U27 | File corrotti e troncati (circa 20.000 varianti) | solo errori chiari, mai eccezioni grezze o blocchi | harness |
 | U28 | 3000 ricette casuali | motore identico a un'implementazione di riferimento ingenua, validatore d'accordo | core |
 | U29 | Set completo di materiale con Use Selection | albedo e normal non finiscono negli slot sbagliati | core + Unity |
 | U30 | Split con suffisso vuoto o duplicato, cartella ignorata da Unity | rifiutato, sorgente intatto | Unity |
@@ -206,7 +209,7 @@ Ogni caso ha un test automatico. "Esatto" significa confronto bit per bit, nessu
 ## 8. Fuori scope nella 1.0 (roadmap)
 
 - Batch su cartelle intere (raggruppamento automatico per nome). L'auto-assign per nome è già la base.
-- Scrittura PSD/TIF e lettura EXR senza importer.
+- Scrittura PSD/TIF.
 - Integrazione nell'hub: la vista è già separata (`ChannelPackerView`), serve solo sapere come è fatto l'hub.
 - Texture array, cubemap, 3D.
 

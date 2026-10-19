@@ -1,3 +1,11 @@
 # .NET build output of the test harness (Tests~ is ignored by Unity)
 Tests~/**/bin/
 Tests~/**/obj/
+
+# Editor and OS files
+.vs/
+.idea/
+*.user
+.DS_Store
+TestResults/
+__pycache__/

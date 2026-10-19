@@ -4,9 +4,16 @@
   "displayName": "DAVFX Texture Channel Packer",
   "description": "Pack, swap, split, invert and remap texture channels without losing quality. Reads the original source files (not Unity's compressed copy), writes lossless PNG, TGA and EXR, and includes presets for HDRP/URP mask maps, detail maps, ORM, normal map green flip and VFX masks.",
   "unity": "2021.3",
+  "documentationUrl": "https://github.com/DavideMezzaqui/texture-channel-packer#readme",
+  "changelogUrl": "https://github.com/DavideMezzaqui/texture-channel-packer/blob/main/CHANGELOG.md",
+  "licensesUrl": "https://github.com/DavideMezzaqui/texture-channel-packer/blob/main/LICENSE.md",
   "author": {
     "name": "DAVFX",
     "url": "https://www.davfx.dev/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DavideMezzaqui/texture-channel-packer.git"
   },
   "keywords": [
     "texture",

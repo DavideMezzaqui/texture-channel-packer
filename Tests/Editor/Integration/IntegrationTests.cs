@@ -236,24 +236,32 @@ namespace DAVFX.TextureChannelPacker.Tests
                 Output = new OutputSettings { folder = Folder, fileName = "T_Wall_N", format = OutputFormat.PNG, backupOnOverwrite = true }
             };
 
-            var first = ChannelPacker.Pack(request, false);
-            Assert.AreEqual(path, first.AssetPath);
-            Assert.AreEqual(guid, AssetDatabase.AssetPathToGUID(path), "GUID kept");
-            Assert.IsTrue(File.Exists(first.BackupPath), "backup written");
-            Assert.AreEqual(TextureImporterType.NormalMap, ((TextureImporter)AssetImporter.GetAtPath(path)).textureType, "import settings kept");
-            var flipped = ReadOutput(path);
-            for (int i = 0; i < normal.PixelCount; i++)
-                Assert.AreEqual(255 - ColorMath.Quantize(normal.G[i], 255), ColorMath.Quantize(flipped.G[i], 255));
+            PackResult first = null, second = null;
+            try
+            {
+                first = ChannelPacker.Pack(request, false);
+                Assert.AreEqual(path, first.AssetPath);
+                Assert.AreEqual(guid, AssetDatabase.AssetPathToGUID(path), "GUID kept");
+                Assert.IsTrue(File.Exists(first.BackupPath), "backup written");
+                Assert.AreEqual(TextureImporterType.NormalMap, ((TextureImporter)AssetImporter.GetAtPath(path)).textureType, "import settings kept");
+                var flipped = ReadOutput(path);
+                for (int i = 0; i < normal.PixelCount; i++)
+                    Assert.AreEqual(255 - ColorMath.Quantize(normal.G[i], 255), ColorMath.Quantize(flipped.G[i], 255));
 
-            request.Inputs[0] = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
-            var second = ChannelPacker.Pack(request, false);
-            TestImages.AssertImageExact(normal, ReadOutput(path), 255);
+                request.Inputs[0] = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+                second = ChannelPacker.Pack(request, false);
+                TestImages.AssertImageExact(normal, ReadOutput(path), 255);
 
-            // Two overwrites in a row keep two distinct backups: the original is never lost.
-            Assert.AreNotEqual(first.BackupPath, second.BackupPath);
-            TestImages.AssertImageExact(normal, PngCodec.Decode(File.ReadAllBytes(first.BackupPath)), 255);
-            Directory.Delete(Path.GetDirectoryName(first.BackupPath), true);
-            Directory.Delete(Path.GetDirectoryName(second.BackupPath), true);
+                // Two overwrites in a row keep two distinct backups: the original is never lost.
+                Assert.AreNotEqual(first.BackupPath, second.BackupPath);
+                TestImages.AssertImageExact(normal, PngCodec.Decode(File.ReadAllBytes(first.BackupPath)), 255);
+            }
+            finally
+            {
+                foreach (var result in new[] { first, second })
+                    if (result != null && result.BackupPath != null && Directory.Exists(Path.GetDirectoryName(result.BackupPath)))
+                        Directory.Delete(Path.GetDirectoryName(result.BackupPath), true);
+            }
         }
 
         [Test]

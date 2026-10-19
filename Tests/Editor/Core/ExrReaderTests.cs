@@ -230,7 +230,8 @@ namespace DAVFX.TextureChannelPacker.Tests
 
             var watch = System.Diagnostics.Stopwatch.StartNew();
             var image = ExrReader.Decode(file.ToArray());
-            Assert.Less(watch.ElapsedMilliseconds, 2000);
+            // A linear search takes minutes here; the margin keeps slow Editor or CI machines from failing.
+            Assert.Less(watch.ElapsedMilliseconds, 15000);
             Assert.AreEqual(width, image.Width);
             Assert.AreEqual(lines, image.Height);
             Assert.IsTrue(image.IsGrayscale);
