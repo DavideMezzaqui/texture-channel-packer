@@ -499,5 +499,100 @@ namespace DAVFX.TextureChannelPacker.Tests
             Assert.AreEqual(64, ColorMath.Quantize(output.G[100], 255));
             Assert.AreEqual(64, ColorMath.Quantize(output.A[100], 255));
         }
+
+        static PackRequest ConstantRequest(string fileName, int width, int height, OutputLayout layout, ImportMode importMode)
+        {
+            var recipe = PackPresets.Find("Solid Color - Constant Mask").Recipe.Clone();
+            recipe.layout = layout;
+            return new PackRequest
+            {
+                Recipe = recipe,
+                Size = new SizeSettings { mode = SizeMode.Custom, customWidth = width, customHeight = height },
+                Output = new OutputSettings { folder = Folder, fileName = fileName, importMode = importMode }
+            };
+        }
+
+        [Test]
+        public void LargeOutput_IsNotDownscaled_InAnyImportMode([Values(ImportMode.ToolSettings, ImportMode.UnityDefaults)] ImportMode mode)
+        {
+            var result = ChannelPacker.Pack(ConstantRequest("T_Wide", 4096, 4, OutputLayout.RGBA, mode), false);
+            var importer = (TextureImporter)AssetImporter.GetAtPath(result.AssetPath);
+            Assert.GreaterOrEqual(importer.maxTextureSize, 4096, "Unity's default max size is 2048");
+            Assert.AreEqual(4096, AssetDatabase.LoadAssetAtPath<Texture2D>(result.AssetPath).width);
+        }
+
+        [Test]
+        public void ToolSettings_KeepNonPowerOfTwoSize()
+        {
+            var result = ChannelPacker.Pack(ConstantRequest("T_Npot", 100, 60, OutputLayout.RGB, ImportMode.ToolSettings), false);
+            var importer = (TextureImporter)AssetImporter.GetAtPath(result.AssetPath);
+            Assert.AreEqual(TextureImporterNPOTScale.None, importer.npotScale);
+            var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(result.AssetPath);
+            Assert.AreEqual(100, texture.width);
+            Assert.AreEqual(60, texture.height);
+        }
+
+        [Test]
+        public void CopyFromInput_RaisesPlatformMaxSize_AndDoesNotTransformChannelsAgain()
+        {
+            var source = TestImages.Noise(4096, 4, 8, false, false, 40);
+            var texture = WriteAndImport("T_Big_N.png", PngCodec.Encode(source, OutputLayout.RGB, 8), importer =>
+            {
+                importer.textureType = TextureImporterType.NormalMap;
+                importer.maxTextureSize = 4096;
+#if UNITY_2022_1_OR_NEWER
+                importer.flipGreenChannel = true;
+#endif
+                var android = importer.GetPlatformTextureSettings("Android");
+                android.overridden = true;
+                android.maxTextureSize = 512;
+                importer.SetPlatformTextureSettings(android);
+            });
+
+            var recipe = PackPresets.Find("Flip Green (DirectX - OpenGL)").Recipe.Clone();
+            recipe.layout = OutputLayout.RGB;
+            var result = ChannelPacker.Pack(new PackRequest
+            {
+                Recipe = recipe,
+                Inputs = new List<Texture2D> { texture },
+                Output = new OutputSettings { folder = Folder, fileName = "T_Big_N_Flipped", importMode = ImportMode.CopyFromInput, importSourceInput = 0 }
+            }, false);
+
+            var output = (TextureImporter)AssetImporter.GetAtPath(result.AssetPath);
+            Assert.AreEqual(TextureImporterType.NormalMap, output.textureType, "settings copied");
+            Assert.GreaterOrEqual(output.GetPlatformTextureSettings("Android").maxTextureSize, 4096, "platform override raised");
+#if UNITY_2022_1_OR_NEWER
+            Assert.IsFalse(output.flipGreenChannel, "the pixels are already flipped");
+#endif
+        }
+
+        [Test]
+        public void Overwrite_KeepsSettings_ButNotWhatWouldLoseData()
+        {
+            var first = ChannelPacker.Pack(ConstantRequest("T_Grow", 64, 64, OutputLayout.RGB, ImportMode.ToolSettings), false);
+            var importer = (TextureImporter)AssetImporter.GetAtPath(first.AssetPath);
+            Assert.AreEqual(TextureImporterAlphaSource.None, importer.alphaSource);
+            importer.maxTextureSize = 64;
+            importer.mipmapEnabled = false; // a user choice that must survive the overwrite
+            importer.SaveAndReimport();
+
+            var request = ConstantRequest("T_Grow", 256, 256, OutputLayout.RGBA, ImportMode.ToolSettings);
+            request.Output.backupOnOverwrite = false;
+            ChannelPacker.Pack(request, false);
+            importer = (TextureImporter)AssetImporter.GetAtPath(first.AssetPath);
+            Assert.AreEqual(TextureImporterAlphaSource.FromInput, importer.alphaSource, "the new alpha is imported");
+            Assert.GreaterOrEqual(importer.maxTextureSize, 256, "not downscaled");
+            Assert.IsFalse(importer.mipmapEnabled, "other settings kept");
+        }
+
+        [Test]
+        public void SplitTargets_ListTheFilesToConfirm()
+        {
+            var source = TestImages.Noise(8, 8, 8, false, false, 41);
+            var texture = WriteAndImport("T_Parts.png", PngCodec.Encode(source, OutputLayout.RGB, 8));
+            var targets = ChannelPacker.SplitTargets(texture, new SplitSettings());
+            CollectionAssert.AreEqual(new[] { PathOf("T_Parts_R.png"), PathOf("T_Parts_G.png"), PathOf("T_Parts_B.png") }, targets, "no alpha file for an opaque source");
+            CollectionAssert.AreEqual(targets, ChannelPacker.Split(texture, new SplitSettings(), false), "the same files are written");
+        }
     }
 }

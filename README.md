@@ -51,10 +51,10 @@ Operations run in this order: source, combine, color conversion, invert, levels.
 - Formats: PNG (8 or 16-bit), TGA (8-bit, optional RLE), EXR (half or float). All lossless.
 - Bit depth **Auto** picks the lowest depth that keeps every source value (16-bit sources give 16-bit PNG, float sources give float EXR).
 - Size: largest input, smallest input, same as a given input, or custom. Different input sizes are an error until you choose a resample filter (Nearest, Bilinear, Area).
-- Import settings for new files: tool settings (color space, normal map type, compression), copied from an input, or Unity defaults. Max Size is always raised to fit the real resolution.
-- Overwriting an existing file replaces it in place: GUID, import settings and every material reference are kept. A backup goes to `Library/DAVFX_ChannelPacker/Backups`.
+- Import settings for new files: tool settings (color space, normal map type, compression, no power-of-two rescaling), copied from an input, or Unity defaults. Max Size, including platform overrides, is always raised to fit the real resolution. Copied settings that would transform the channels again (Flip Green Channel, swizzle, Create from Grayscale) are turned off.
+- Overwriting an existing file replaces it in place: GUID, import settings and every material reference are kept, except what would silently lose data (the default Max Size is raised to the new resolution, and a new alpha channel is imported). A backup goes to `Library/DAVFX_ChannelPacker/Backups`. Files checked in to version control are checked out first.
 
-**Split mode** writes every channel of a texture as its own grayscale file at the same bit depth.
+**Split mode** writes every channel of a texture as its own grayscale file at the same bit depth, and asks before replacing existing files.
 
 **Project window actions** (right click on textures): Open in Channel Packer, Split Channels, Flip Normal Green (DirectX - OpenGL), Remove Alpha, Invert RGB. They always create new files.
 

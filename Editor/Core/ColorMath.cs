@@ -60,7 +60,8 @@ namespace DAVFX.TextureChannelPacker
                 return 0;
             if (value >= 1f)
                 return maxValue;
-            return (int)(value * maxValue + 0.5f);
+            // In double the product is exact, so a value just below a half step never rounds up.
+            return (int)(value * (double)maxValue + 0.5);
         }
     }
 }

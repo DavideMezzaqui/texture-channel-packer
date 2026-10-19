@@ -138,17 +138,16 @@ namespace DAVFX.TextureChannelPacker
                 string error = SplitError(source, settings);
                 if (error != null)
                     throw new PackException(error);
-                string sourcePath = AssetDatabase.GetAssetPath(source);
-                string folder = string.IsNullOrWhiteSpace(settings.folder) ? AssetPaths.WritableFolderOf(sourcePath) : settings.folder;
                 var image = DecodeCache.Get(source);
-                var format = settings.autoFormat ? AutoFormat(sourcePath, image.Precision) : settings.format;
+                string folder = SplitFolder(source, settings);
+                var format = SplitFormat(source, settings, image);
                 var depth = OutputSettings.ResolveDepth(format, settings.bitDepth, image.Precision);
+                if (settings.neverOverwrite)
+                    AssetPaths.EnsureFolder(folder);
 
                 for (int c = 0; c < 4; c++)
                 {
-                    if (!settings.channels[c])
-                        continue;
-                    if (c == 3 && !image.HasAlpha && settings.skipMissingAlpha)
+                    if (!SplitWrites(settings, image, c))
                         continue;
                     if (showProgress)
                         EditorUtility.DisplayProgressBar(ProgressTitle, "Writing channel " + "RGBA"[c], 0.2f + 0.2f * c);
@@ -177,6 +176,38 @@ namespace DAVFX.TextureChannelPacker
                     EditorUtility.ClearProgressBar();
             }
             return written;
+        }
+
+        /// <summary>
+        /// The files <see cref="Split"/> would write when nothing is renamed, so a caller can ask before replacing them.
+        /// </summary>
+        public static List<string> SplitTargets(Texture2D source, SplitSettings settings)
+        {
+            var targets = new List<string>();
+            if (SplitError(source, settings) != null)
+                return targets;
+            var image = DecodeCache.Get(source);
+            string folder = SplitFolder(source, settings);
+            string extension = OutputSettings.ExtensionFor(SplitFormat(source, settings, image));
+            for (int c = 0; c < 4; c++)
+                if (SplitWrites(settings, image, c))
+                    targets.Add(folder + "/" + source.name + settings.suffixes[c] + extension);
+            return targets;
+        }
+
+        static string SplitFolder(Texture2D source, SplitSettings settings)
+        {
+            return string.IsNullOrWhiteSpace(settings.folder) ? AssetPaths.WritableFolderOf(AssetDatabase.GetAssetPath(source)) : settings.folder;
+        }
+
+        static OutputFormat SplitFormat(Texture2D source, SplitSettings settings, PixelImage image)
+        {
+            return settings.autoFormat ? AutoFormat(AssetDatabase.GetAssetPath(source), image.Precision) : settings.format;
+        }
+
+        static bool SplitWrites(SplitSettings settings, PixelImage image, int channel)
+        {
+            return settings.channels[channel] && !(channel == 3 && !image.HasAlpha && settings.skipMissingAlpha);
         }
 
         /// <summary>Why a split cannot run with these settings (folder, suffixes), or null when it can.</summary>

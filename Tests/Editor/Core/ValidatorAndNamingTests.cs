@@ -22,6 +22,38 @@ namespace DAVFX.TextureChannelPacker.Tests
         }
 
         [Test]
+        public void HugeOutputs_AreFlaggedBeforePacking()
+        {
+            var size = new SizeSettings { mode = SizeMode.Custom, customWidth = 16384, customHeight = 16384 };
+            var plan = PackValidator.Validate(MaskMap(), new InputInfo[4], size, Output(OutputFormat.PNG, OutputBitDepth.Bits16));
+            Assert.IsTrue(plan.HasErrors, "16-bit RGBA PNG over 2 GB");
+            plan = PackValidator.Validate(MaskMap(), new InputInfo[4], size, Output(OutputFormat.PNG, OutputBitDepth.Bits8));
+            Assert.IsFalse(plan.HasErrors, string.Join("\n", plan.Issues));
+            plan = PackValidator.Validate(MaskMap(), new InputInfo[4], size, Output(OutputFormat.EXR, OutputBitDepth.Float));
+            Assert.IsFalse(plan.HasErrors, string.Join("\n", plan.Issues));
+            Assert.IsTrue(plan.Issues.Any(i => i.Severity == IssueSeverity.Warning && i.Message.Contains("2 GB")));
+        }
+
+        [Test]
+        public void FolderEndingWithDot_IsRejected()
+        {
+            Assert.IsNotNull(PackValidator.FolderError("Assets/Textures."));
+            Assert.IsNotNull(PackValidator.FolderError("Assets/Textures./Masks"));
+            Assert.IsNull(PackValidator.FolderError("Assets/Textures.v2"));
+        }
+
+        [Test]
+        public void Quantize_ValueJustBelowHalfStep_RoundsDown()
+        {
+            Assert.AreEqual(0, ColorMath.Quantize(0.49999997f / 255f, 255));
+            Assert.AreEqual(1, ColorMath.Quantize(0.5f / 255f, 255));
+            for (int k = 0; k <= 255; k++)
+                Assert.AreEqual(k, ColorMath.Quantize(k / 255f, 255));
+            for (int k = 0; k <= 65535; k += 7)
+                Assert.AreEqual(k, ColorMath.Quantize(k / 65535f, 65535));
+        }
+
+        [Test]
         public void MatchingSizes_NoErrors()
         {
             var plan = PackValidator.Validate(MaskMap(), new[] { Info(512, 512), Info(512, 512), null, null }, new SizeSettings(), Output());
@@ -216,6 +248,8 @@ namespace DAVFX.TextureChannelPacker.Tests
             Assert.AreEqual("T_Erosion_01", NamingUtility.BaseName(new[] { "T_Erosion_01" }), "variant numbers are kept");
             Assert.AreEqual("T_Wall", NamingUtility.BaseName(new[] { "T_Wall_N_GL" }), "the normal convention is not part of the new name");
             Assert.AreEqual("Wall", NamingUtility.BaseName(new[] { "Wall_4K" }));
+            Assert.AreEqual("T_Rock", NamingUtility.BaseName(new[] { "T_Rock_Base_Color" }), "two-word keyword");
+            Assert.AreEqual("T_Rock", NamingUtility.BaseName(new[] { "T_Rock_Ambient_Occlusion_2K" }), "two-word keyword after a size");
             Assert.AreEqual("4K", NamingUtility.BaseName(new[] { "4K" }), "never reduced to nothing");
             Assert.AreEqual("T_Rock", NamingUtility.BaseName(new[] { "T_Rock_AO_2K", "T_Rock_Roughness_2K" }));
             Assert.AreEqual("Noise", NamingUtility.BaseName(new[] { "Noise" }));

@@ -130,6 +130,18 @@ namespace DAVFX.TextureChannelPacker.Tests
     public class TgaCodecTests
     {
         [Test]
+        public void PaletteIndexBelowFirstEntry_IsOpaque()
+        {
+            // 2x1, 8-bit indices, a 32-bit palette whose first entry is index 1 (opaque red). Index 0 was never loaded.
+            var data = new byte[] { 0, 1, 1, 1, 0, 1, 0, 32, 0, 0, 0, 0, 2, 0, 1, 0, 8, 0x28, 0, 0, 255, 255, 0, 1 };
+            var image = TgaCodec.Decode(data);
+            Assert.AreEqual(1f, image.A[0], "unloaded entry: black, opaque");
+            Assert.AreEqual(0f, image.R[0]);
+            Assert.AreEqual(1f, image.R[1]);
+            Assert.AreEqual(1f, image.A[1]);
+        }
+
+        [Test]
         public void RoundTrip_AllLayouts_RawAndRle([Values(false, true)] bool rle,
             [Values(OutputLayout.RGBA, OutputLayout.RGB, OutputLayout.Grayscale, OutputLayout.GrayscaleAlpha)] OutputLayout layout)
         {

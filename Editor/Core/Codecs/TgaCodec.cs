@@ -71,6 +71,9 @@ namespace DAVFX.TextureChannelPacker.Codecs
                 palG = new float[palR.Length];
                 palB = new float[palR.Length];
                 palA = new float[palR.Length];
+                // Indices below the first loaded entry stay black but opaque, not transparent.
+                for (int i = 0; i < palA.Length; i++)
+                    palA[i] = 1f;
                 for (int i = 0; i < mapLength; i++)
                 {
                     int p = pos + i * entryBytes;

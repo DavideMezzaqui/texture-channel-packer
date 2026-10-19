@@ -63,6 +63,14 @@ namespace DAVFX.TextureChannelPacker
                     if (cut <= 0)
                         break;
                     string last = result.Substring(cut + 1).ToLowerInvariant();
+                    // Two-word keywords: "T_Rock_Base_Color" gives "T_Rock".
+                    int cutPair = cut > 0 ? result.LastIndexOfAny(s_Separators, cut - 1) : -1;
+                    if (!keywordRemoved && cutPair > 0 &&
+                        PackPresets.AllKeywords.Contains(result.Substring(cutPair + 1, cut - cutPair - 1).ToLowerInvariant() + last))
+                    {
+                        result = result.Substring(0, cutPair);
+                        break;
+                    }
                     if (!keywordRemoved && PackPresets.AllKeywords.Contains(last))
                         keywordRemoved = true;
                     else if (!s_NamingNoiseToken.IsMatch(last))

@@ -143,6 +143,27 @@ namespace DAVFX.TextureChannelPacker
             m_Repaint?.Invoke();
         }
 
+        /// <summary>Events that can edit the state; the others (mouse moves for the readout) need no undo snapshot.</summary>
+        static bool CanChangeState(EventType type)
+        {
+            switch (type)
+            {
+                case EventType.Layout:
+                case EventType.Repaint:
+                case EventType.MouseMove:
+                case EventType.MouseEnterWindow:
+                case EventType.MouseLeaveWindow:
+                case EventType.ScrollWheel:
+                case EventType.DragUpdated:
+                case EventType.DragExited:
+                case EventType.Ignore:
+                case EventType.Used:
+                    return false;
+                default:
+                    return true;
+            }
+        }
+
         void RecordUndo()
         {
             if (m_UndoTarget != null)
@@ -333,7 +354,7 @@ namespace DAVFX.TextureChannelPacker
                 m_OutputExists = SafeFileExists(state.output.AssetPath);
                 m_SplitSettingsError = state.splitSource != null ? ChannelPacker.SplitError(state.splitSource, state.split) : null;
             }
-            if (type != EventType.Layout && type != EventType.Repaint)
+            if (CanChangeState(type))
                 RecordUndo();
 
             bool changed = false;
@@ -1021,6 +1042,12 @@ namespace DAVFX.TextureChannelPacker
                 state.autoFolder = false;
             if (GUILayout.Button("...", EditorStyles.miniButton, GUILayout.Width(26)))
                 EditorApplication.delayCall += PickOutputFolder;
+            bool autoFolder = GUILayout.Toggle(state.autoFolder, new GUIContent("Auto", "Folder of the first input"), EditorStyles.miniButton, GUILayout.Width(40));
+            if (autoFolder != state.autoFolder)
+            {
+                state.autoFolder = autoFolder;
+                state.UpdateAutoName();
+            }
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.BeginHorizontal();
@@ -1351,6 +1378,17 @@ namespace DAVFX.TextureChannelPacker
                 return;
             try
             {
+                if (!state.split.neverOverwrite)
+                {
+                    var existing = ChannelPacker.SplitTargets(state.splitSource, state.split).Where(SafeFileExists).ToList();
+                    if (existing.Count > 0 && !EditorUtility.DisplayDialog("Overwrite textures?",
+                            $"These files already exist and will be replaced in place:\n\n{string.Join("\n", existing)}\n\nA backup is saved in {TextureOutputWriter.BackupFolder}.",
+                            "Overwrite", "Cancel"))
+                    {
+                        m_Repaint?.Invoke();
+                        return;
+                    }
+                }
                 var written = ChannelPacker.Split(state.splitSource, state.split);
                 var objects = written.Select(AssetDatabase.LoadAssetAtPath<Texture2D>).Where(t => t != null).ToArray();
                 m_LastOutput = objects.FirstOrDefault();

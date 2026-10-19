@@ -175,6 +175,22 @@ namespace DAVFX.TextureChannelPacker
             if (output.format == OutputFormat.EXR && plan.ResolvedDepth == OutputBitDepth.Half && precision == SamplePrecision.UNorm16)
                 plan.Add(IssueSeverity.Warning, "Half float cannot store every 16-bit value exactly. Use Float for a lossless result.");
 
+            // The PNG encoder builds the filtered image in a single array, limited to 2 GB.
+            if (output.format == OutputFormat.PNG && plan.Width > 0 && plan.Height > 0)
+            {
+                int sampleBytes = plan.ResolvedDepth == OutputBitDepth.Bits16 ? 2 : 1;
+                long pngBytes = (long)plan.Height * ((long)plan.Width * PackRecipe.ActiveChannels(recipe.layout).Count * sampleBytes + 1);
+                if (pngBytes > int.MaxValue)
+                    plan.Add(IssueSeverity.Error, $"{plan.Width}x{plan.Height} at {OutputSettings.DepthName(plan.ResolvedDepth)} is too large for a single PNG (over 2 GB of pixel data). Use EXR, 8-bit, fewer channels or a smaller size.");
+            }
+            else if (output.format == OutputFormat.EXR && plan.Width > 0 && plan.Height > 0)
+            {
+                int sampleBytes = plan.ResolvedDepth == OutputBitDepth.Float ? 4 : 2;
+                long exrBytes = (long)plan.Width * plan.Height * PackRecipe.ActiveChannels(recipe.layout).Count * sampleBytes;
+                if (exrBytes > int.MaxValue)
+                    plan.Add(IssueSeverity.Warning, $"{plan.Width}x{plan.Height} at {OutputSettings.DepthName(plan.ResolvedDepth)} is over 2 GB uncompressed: the EXR can be written only if it compresses below 2 GB.");
+            }
+
             if (anyLossy)
                 plan.Add(IssueSeverity.Info, "A source is already lossy (JPEG or GPU compressed). The tool keeps its current pixels but cannot restore lost detail.");
 
@@ -250,6 +266,9 @@ namespace DAVFX.TextureChannelPacker
             {
                 if (segment.Length == 0 || IsIgnoredByUnity(segment) || segment.Trim() != segment)
                     return $"Output folder segment '{segment}' is empty, has extra spaces, or is ignored by Unity (starts with '.' or ends with '~').";
+                // Windows drops a trailing dot when it creates the folder, so the path would not match the disk.
+                if (segment.EndsWith(".", StringComparison.Ordinal))
+                    return $"Output folder segment '{segment}' ends with a dot.";
                 if (IsReservedOnWindows(segment))
                     return $"Output folder segment '{segment}' is a reserved name on Windows.";
             }

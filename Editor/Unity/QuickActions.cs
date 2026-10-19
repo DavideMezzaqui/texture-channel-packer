@@ -33,7 +33,7 @@ namespace DAVFX.TextureChannelPacker
         static void Split()
         {
             var created = new List<string>();
-            Run("Split Channels", texture => created.AddRange(ChannelPacker.Split(texture, new SplitSettings { neverOverwrite = true })));
+            Run("Split Channels", texture => created.AddRange(ChannelPacker.Split(texture, new SplitSettings { neverOverwrite = true }, false)));
             Finish(created);
         }
 
@@ -125,6 +125,11 @@ namespace DAVFX.TextureChannelPacker
                         // Keep going with the other textures; the full error is in the Console.
                         Debug.LogError($"[Channel Packer] {title} failed on {textures[i].name}: {e.GetType().Name}: {e.Message}", textures[i]);
                         Debug.LogException(e);
+                    }
+                    finally
+                    {
+                        // A batch of large textures would otherwise stay decoded in memory until the cache expires.
+                        DecodeCache.Invalidate(AssetDatabase.GetAssetPath(textures[i]));
                     }
                 }
             }

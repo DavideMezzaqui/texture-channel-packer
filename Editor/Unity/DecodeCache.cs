@@ -159,9 +159,11 @@ namespace DAVFX.TextureChannelPacker
             {
                 image = Loader(texture);
             }
-            catch (PackException e)
+            catch (Exception e)
             {
-                s_Entries.AddFirst(new Entry { Key = key, Error = e.Message, FailedAt = EditorApplication.timeSinceStartup });
+                // Remember every failure: retrying on each repaint would re-import the source in a loop.
+                string message = e is PackException ? e.Message : $"{e.GetType().Name}: {e.Message}";
+                s_Entries.AddFirst(new Entry { Key = key, Error = message, FailedAt = EditorApplication.timeSinceStartup });
                 throw;
             }
 

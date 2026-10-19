@@ -178,6 +178,13 @@ namespace DAVFX.TextureChannelPacker.Codecs
                 }
             });
 
+            // The file is assembled in one MemoryStream, limited to 2 GB (header and offsets are a few KB at most).
+            long dataBytes = 0;
+            foreach (var block in blocks)
+                dataBytes += block.Length + 8L + 8L;
+            if (dataBytes > int.MaxValue - (1 << 20))
+                throw new PackException($"{width}x{height} does not fit in a single EXR file under 2 GB with this data. Use Half instead of Float, fewer channels or a smaller size.");
+
             using (var output = new MemoryStream())
             using (var writer = new BinaryWriter(output, Encoding.ASCII, true))
             {

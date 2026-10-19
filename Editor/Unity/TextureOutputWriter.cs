@@ -30,15 +30,27 @@ namespace DAVFX.TextureChannelPacker
             AssetPaths.EnsureFolder(folder);
             string full = Path.GetFullPath(assetPath);
             bool existed = File.Exists(full);
+            // Files under version control (Perforce, Plastic) stay read-only until checked out.
+            if (existed && !AssetDatabase.MakeEditable(assetPath))
+                throw new PackException($"{assetPath} is read-only (not checked out from version control?). Check it out or choose another file name.");
             if (existed && settings.backupOnOverwrite)
                 backupPath = Backup(full);
 
-            File.WriteAllBytes(full, bytes);
+            try
+            {
+                File.WriteAllBytes(full, bytes);
+            }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+            {
+                throw new PackException($"Could not write {assetPath}: {e.Message}", e);
+            }
             DecodeCache.Invalidate(assetPath);
             AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
 
             if (!existed)
                 ApplyImportSettings(assetPath, image, layout, settings, importReference);
+            else
+                KeepLossless(assetPath, image, layout);
             return assetPath;
         }
 
@@ -61,8 +73,15 @@ namespace DAVFX.TextureChannelPacker
         public static void ApplyImportSettings(string assetPath, PixelImage image, OutputLayout layout, OutputSettings settings, Texture2D importReference)
         {
             var importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
-            if (importer == null || settings.importMode == ImportMode.UnityDefaults)
+            if (importer == null)
                 return;
+            if (settings.importMode == ImportMode.UnityDefaults)
+            {
+                // Unity's settings, except that the texture must not be downscaled below its real size.
+                if (RaiseMaxSize(importer, image, true))
+                    importer.SaveAndReimport();
+                return;
+            }
 
             var referenceImporter = importReference != null
                 ? AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(importReference)) as TextureImporter
@@ -73,6 +92,16 @@ namespace DAVFX.TextureChannelPacker
                 var textureSettings = new TextureImporterSettings();
                 referenceImporter.ReadTextureSettings(textureSettings);
                 importer.SetTextureSettings(textureSettings);
+                // Settings that transform the channels on import would be applied a second time to pixels
+                // that already hold the result (a normal flipped twice, a height map turned into a normal map).
+                importer.convertToNormalmap = false;
+#if UNITY_2022_1_OR_NEWER
+                importer.flipGreenChannel = false;
+                importer.swizzleR = TextureImporterSwizzle.R;
+                importer.swizzleG = TextureImporterSwizzle.G;
+                importer.swizzleB = TextureImporterSwizzle.B;
+                importer.swizzleA = TextureImporterSwizzle.A;
+#endif
                 importer.SetPlatformTextureSettings(referenceImporter.GetDefaultPlatformTextureSettings());
                 foreach (string platform in KnownPlatforms)
                 {
@@ -85,6 +114,8 @@ namespace DAVFX.TextureChannelPacker
             {
                 importer.textureType = settings.textureType == OutputTextureType.NormalMap ? TextureImporterType.NormalMap : TextureImporterType.Default;
                 importer.sRGBTexture = settings.colorSpace == OutputColorSpace.Srgb;
+                // A lossless 1000x1000 mask must not be rescaled to 1024 on import.
+                importer.npotScale = TextureImporterNPOTScale.None;
                 switch (settings.compression)
                 {
                     case OutputCompression.HighQuality:
@@ -100,10 +131,51 @@ namespace DAVFX.TextureChannelPacker
             // and the texture must not be downscaled by the default 2048 max size.
             importer.alphaSource = PackRecipe.HasAlpha(layout) ? TextureImporterAlphaSource.FromInput : TextureImporterAlphaSource.None;
             importer.alphaIsTransparency = false;
-            int needed = NeededMaxSize(image.Width, image.Height);
-            if (importer.maxTextureSize < needed)
-                importer.maxTextureSize = needed;
+            RaiseMaxSize(importer, image, true);
             importer.SaveAndReimport();
+        }
+
+        /// <summary>
+        /// Overwrite in place keeps the import settings, except what would silently lose data: an alpha the file now
+        /// has but the importer ignores, and a max size below the new resolution.
+        /// </summary>
+        static void KeepLossless(string assetPath, PixelImage image, OutputLayout layout)
+        {
+            var importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
+            if (importer == null)
+                return;
+            // Only the default max size: a smaller platform override on an existing texture is a deliberate choice.
+            bool changed = RaiseMaxSize(importer, image, false);
+            if (PackRecipe.HasAlpha(layout) && importer.alphaSource == TextureImporterAlphaSource.None)
+            {
+                importer.alphaSource = TextureImporterAlphaSource.FromInput;
+                changed = true;
+            }
+            if (changed)
+                importer.SaveAndReimport();
+        }
+
+        /// <summary>Raises the default (and optionally every overridden platform) max size that is below the image size.</summary>
+        static bool RaiseMaxSize(TextureImporter importer, PixelImage image, bool platforms)
+        {
+            int needed = NeededMaxSize(image.Width, image.Height);
+            bool changed = false;
+            if (importer.maxTextureSize < needed)
+            {
+                importer.maxTextureSize = needed;
+                changed = true;
+            }
+            foreach (string platform in platforms ? KnownPlatforms : Array.Empty<string>())
+            {
+                var platformSettings = importer.GetPlatformTextureSettings(platform);
+                if (platformSettings.overridden && platformSettings.maxTextureSize < needed)
+                {
+                    platformSettings.maxTextureSize = needed;
+                    importer.SetPlatformTextureSettings(platformSettings);
+                    changed = true;
+                }
+            }
+            return changed;
         }
 
         public static int NeededMaxSize(int width, int height)
